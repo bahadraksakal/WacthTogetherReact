@@ -339,6 +339,17 @@ function App() {
                   otherUserId={otherUserId}
                 />
               )}
+              {/* VideoCall bileşeni  artık playeriçinden çağrılıyor.*/}
+              {/* {showVideoCall && otherUserId && (
+                <VideoCall
+                  socket={socket}
+                  targetUserId={otherUserId}
+                  showVideoCall={showVideoCall}
+                  isAudioCallEnabled={isAudioCallEnabled}
+                  startWithAudio={true} // Ses varsayılan olarak açık
+                  startWithVideo={true} // Kamera varsayılan olarak açık
+                />
+              )} */}
             </div>
           </main>
         </div>

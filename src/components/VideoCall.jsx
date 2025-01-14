@@ -141,23 +141,23 @@ function VideoCall({
   }, [isRemoteAudioMuted]);
 
   // MIC ve Uzak Ses Slider
-  const handleMicVolumeChange = (e) => {
+  const handleMicVolumeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     setMicVolume(value);
     // GainNode ayarı (0 - 1)
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = value / 100;
     }
-  };
+  }, []);
 
-  const handleRemoteVolumeChange = (e) => {
+  const handleRemoteVolumeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     setRemoteVolume(value);
     // Remote video volume ayarı
     if (remoteVideoRef.current) {
       remoteVideoRef.current.volume = value / 100;
     }
-  };
+  }, []);
 
   // WebRTC aramasını başlat
   const startCall = useCallback(async () => {
@@ -498,6 +498,15 @@ function VideoCall({
               className="absolute top-0 left-0 w-full h-full object-cover"
               style={{ display: isVideoEnabled ? "block" : "none" }}
             />
+            {/* Video kapalıyken gösterilecek ikon */}
+            {!isVideoEnabled && (
+              <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800">
+                <FontAwesomeIcon
+                  icon={faVideoSlash}
+                  className="text-white text-4xl"
+                />
+              </div>
+            )}
           </div>
 
           {/* Remote Video */}

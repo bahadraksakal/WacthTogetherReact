@@ -52,7 +52,6 @@ function VideoPlayer({
   socket,
   isAudioCallEnabled,
   otherUserId,
-
 }) {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -258,18 +257,25 @@ function VideoPlayer({
       </button>
       {/* VideoCall bileşeni */}
       {showVideoCall && otherUserId && (
-            <VideoCall
-              socket={socket}
-              isHidden={!showVideoCall}
-              onToggle={toggleVideoCall}
-              showVideoCall={showVideoCall}
-              isFullScreen={isFullScreen}
-              isAudioCallEnabled={isAudioCallEnabled}
-              targetUserId={otherUserId}
-              startWithAudio={true} // Başlangıçta sesli
-              startWithVideo={true} // Başlangıçta kameralı
-            />
-          )}
+        <VideoCall
+          socket={socket}
+          targetUserId={otherUserId}
+          showVideoCall={showVideoCall}
+          isAudioCallEnabled={isAudioCallEnabled}
+          startWithAudio={true} // Ses varsayılan olarak açık
+          startWithVideo={true} // Kamera varsayılan olarak açık
+
+          // socket={socket}
+          // isHidden={!showVideoCall}
+          // onToggle={toggleVideoCall}
+          // showVideoCall={showVideoCall}
+          // isFullScreen={isFullScreen}
+          // isAudioCallEnabled={isAudioCallEnabled}
+          // targetUserId={otherUserId}
+          // startWithAudio={true} // Başlangıçta sesli
+          // startWithVideo={true} // Başlangıçta kameralı
+        />
+      )}
     </div>
   );
 }
