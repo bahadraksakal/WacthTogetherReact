@@ -76,20 +76,24 @@ function FileUpload({ onUploadSuccess, disabled }) {
         style={{ borderRadius: "1.5rem" }}
       >
         <FontAwesomeIcon icon={faUpload} className="mr-2" />
-        {uploading ? <ClipLoader color="#ffffff" size={20} /> :  "Video Yükle"}
+        {uploading || disabled ? (
+          <ClipLoader color="#ffffff" size={20} />
+        ) : (
+          "Video Yükle"
+        )}
       </button>
-        {errorMessage && (
+      {errorMessage && (
         <p className="text-red-500 text-sm mt-1">{errorMessage}</p>
       )}
-         {selectedFile && (
+      {(selectedFile || disabled) && (
         <button
           type="button"
           className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2"
           onClick={handleSubmit}
-          disabled={uploading}
+          disabled={disabled || uploading}
           style={{ borderRadius: "1.5rem" }}
         >
-          {uploading ? "Yükleniyor..." : "Yüklemeyi Onayla"}
+          {uploading || disabled ? "Yükleniyor..." : "Yüklemeyi Onayla"}
         </button>
       )}
     </div>

@@ -49,9 +49,8 @@ function App() {
 
   // Socket bağlantılarını yönet
   useEffect(() => {
-    socketLoadingBarRef.current.continuousStart();
-
     socket.on("connect", () => {
+      socketLoadingBarRef.current.continuousStart();
       console.log("Sunucuya bağlandı");
       socketLoadingBarRef.current.complete();
     });
@@ -86,13 +85,13 @@ function App() {
 
     socket.on("user-joined", (data) => {
       console.log("Yeni kullanıcı katıldı:", data);
-      setUserCount((prevCount) => prevCount + 1);
+      // setUserCount((prevCount) => prevCount + 1);
       setOtherUserId(data.id);
     });
 
     socket.on("user-left", (socketId) => {
       console.log("Kullanıcı ayrıldı:", socketId);
-      setUserCount((prevCount) => Math.max(0, prevCount - 1));
+      // setUserCount((prevCount) => Math.max(0, prevCount - 1));
       if (socketId === otherUserId) {
         setShowVideoCall(false);
         setOtherUserId(null);
@@ -115,12 +114,12 @@ function App() {
     // Başka kullanıcı tarafından video silinince
     socket.on("video-deleted", (filename) => {
       setAvailableVideos((prevVideos) =>
-      prevVideos.filter((video) => video !== filename)
+        prevVideos.filter((video) => video !== filename)
       );
       if (uploadedVideo === `${url}/videos/${filename}`) {
-      setUploadedVideo(null);
+        setUploadedVideo(null);
       }
-  });
+    });
 
     // Mevcut video durumu
     socket.on("video-state", (state) => {
