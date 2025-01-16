@@ -18,6 +18,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { Rnd } from "react-rnd";
+import Swal from "sweetalert2";
 
 library.add(
   faVideo,
@@ -63,15 +64,12 @@ function VideoCall({
   const [isCallActive, setIsCallActive] = useState(false);
   const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState(false);
 
-  // Yeni eklenen state'ler
-  const [micVolume, setMicVolume] = useState(100); // 0-100
-  const [remoteVolume, setRemoteVolume] = useState(100); // 0-100
+  const [micVolume, setMicVolume] = useState(100);
+  const [remoteVolume, setRemoteVolume] = useState(100);
 
-  // GainNode vb. için saklama
   const audioContextRef = useRef(null);
   const gainNodeRef = useRef(null);
 
-  // RTCPeerConnection configuration
   const configuration = {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
@@ -79,7 +77,6 @@ function VideoCall({
     ],
   };
 
-  // Ses aç-kapa
   const toggleAudio = useCallback(() => {
     setIsAudioEnabled((prev) => !prev);
     if (localVideoRef.current && localVideoRef.current.srcObject) {
@@ -89,7 +86,6 @@ function VideoCall({
     }
   }, []);
 
-  // Video aç-kapa
   const toggleVideo = useCallback(() => {
     setIsVideoEnabled((prev) => !prev);
     if (localVideoRef.current && localVideoRef.current.srcObject) {
@@ -99,7 +95,6 @@ function VideoCall({
     }
   }, []);
 
-  // Görüşmeyi büyült/küçült
   const toggleExpand = useCallback(() => {
     setIsExpanded((prev) => !prev);
     setDimensions((prevState) => ({
@@ -108,7 +103,6 @@ function VideoCall({
     }));
   }, []);
 
-  // Boyutlandırma
   const handleResize = useCallback((e, direction, ref, delta, position) => {
     setDimensions({
       width: ref.offsetWidth,
@@ -116,7 +110,6 @@ function VideoCall({
     });
   }, []);
 
-  // Pencereyi büyüt
   const increaseSize = useCallback(() => {
     setDimensions((prev) => ({
       width: prev.width + 50,
@@ -124,7 +117,6 @@ function VideoCall({
     }));
   }, []);
 
-  // Pencereyi küçült
   const decreaseSize = useCallback(() => {
     setDimensions((prev) => ({
       width: Math.max(150, prev.width - 50),
@@ -132,7 +124,6 @@ function VideoCall({
     }));
   }, []);
 
-  // Karşı tarafın sesini kapat/aç (bizim tarafımızda)
   const toggleRemoteMute = useCallback(() => {
     setIsRemoteAudioMuted((prev) => !prev);
     if (remoteVideoRef.current) {
@@ -140,11 +131,9 @@ function VideoCall({
     }
   }, [isRemoteAudioMuted]);
 
-  // MIC ve Uzak Ses Slider
   const handleMicVolumeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     setMicVolume(value);
-    // GainNode ayarı (0 - 1)
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = value / 100;
     }
@@ -153,33 +142,43 @@ function VideoCall({
   const handleRemoteVolumeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     setRemoteVolume(value);
-    // Remote video volume ayarı
     if (remoteVideoRef.current) {
       remoteVideoRef.current.volume = value / 100;
     }
   }, []);
 
-  // WebRTC aramasını başlat
   const startCall = useCallback(async () => {
     if (!targetUserId) {
       Swal.fire("Uyarı!", "Bağlanacak başka bir kullanıcı yok.", "warning");
       return;
     }
 
-    // Eğer zaten aktif bir bağlantı varsa, önce kapatalım
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
 
     try {
-      // Hem video hem de audio stream al
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const mediaConstraints = {
         video: isVideoEnabled,
         audio: isAudioEnabled,
-      });
+      };
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      } catch (error) {
+        console.warn("Kamera veya mikrofon erişim hatası:", error);
+        Swal.fire({
+          icon: "warning",
+          title: "Kamera/Mikrofon Erişilemiyor",
+          text: `Görüntülü görüşme için kamera veya mikrofona erişilemedi. Sesli görüşme başlatılıyor. Hata: ${error.message}`,
+        });
+        setIsVideoEnabled(false); // Kamerayı kapat ve sadece sesli devam et
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: isAudioEnabled,
+        });
+      }
 
-      // AudioContext + GainNode ile mikrofon sesini düzenle
       audioContextRef.current = new AudioContext();
       gainNodeRef.current = audioContextRef.current.createGain();
       gainNodeRef.current.gain.value = micVolume / 100;
@@ -187,10 +186,9 @@ function VideoCall({
       const audioTracks = stream.getAudioTracks();
       const videoTracks = stream.getVideoTracks();
 
-      // Eğer ses varsa gain node ekle
       if (audioTracks.length > 0) {
         const audioSource = audioContextRef.current.createMediaStreamSource(
-          new MediaStream([audioTracks[0]])
+          new MediaStream(audioTracks) // Use existing audio tracks
         );
         audioSource.connect(gainNodeRef.current);
       }
@@ -199,27 +197,22 @@ function VideoCall({
         audioContextRef.current.createMediaStreamDestination();
       gainNodeRef.current.connect(destination);
 
-      // Yeni bir stream oluştur: gainNode'dan gelen ses + video track
       const combinedStream = new MediaStream([
         ...destination.stream.getAudioTracks(),
-        ...videoTracks,
+        ...(isVideoEnabled ? videoTracks : []), // Only add video tracks if enabled
       ]);
 
-      // localVideoRef'e göster
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = combinedStream;
       }
 
-      // PeerConnection
       const peerConnection = new RTCPeerConnection(configuration);
       peerConnectionRef.current = peerConnection;
 
-      // Tüm track'leri ekle
       combinedStream.getTracks().forEach((track) => {
         peerConnection.addTrack(track, combinedStream);
       });
 
-      // Remote track yakalama
       peerConnection.ontrack = (event) => {
         const remoteStream = event.streams[0];
         if (remoteVideoRef.current) {
@@ -228,7 +221,6 @@ function VideoCall({
         }
       };
 
-      // ICE adaylarını yönet
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
           socket.emit("ice-candidate", {
@@ -238,11 +230,13 @@ function VideoCall({
         }
       };
 
-      // Teklif oluştur
-      const offer = await peerConnection.createOffer();
+      const offerOptions = {
+        offerToReceiveAudio: 1,
+        offerToReceiveVideo: isVideoEnabled ? 1 : 0,
+      };
+      const offer = await peerConnection.createOffer(offerOptions);
       await peerConnection.setLocalDescription(offer);
 
-      // Teklifi karşı tarafa gönder
       socket.emit("offer", {
         target: targetUserId,
         offer: offer,
@@ -253,7 +247,7 @@ function VideoCall({
       console.error("Arama başlatılamadı:", error);
       Swal.fire(
         "Hata!",
-        "Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin.",
+        `Arama başlatılırken bir hata oluştu: ${error.message}`,
         "error"
       );
     }
@@ -267,7 +261,6 @@ function VideoCall({
     remoteVolume,
   ]);
 
-  // Görüşmeyi bitir
   const endCall = useCallback(() => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
@@ -293,7 +286,6 @@ function VideoCall({
     setIsCallActive(false);
   }, []);
 
-  // Teklif (offer) geldiğinde
   useEffect(() => {
     const handleOffer = async (data) => {
       const { from, offer } = data;
@@ -302,20 +294,35 @@ function VideoCall({
         return;
       }
 
-      // Mevcut bağlantıyı kapatalım (varsayılan iyileştirme)
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
       }
 
       try {
-        // local stream alalım
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const mediaConstraints = {
           video: isVideoEnabled,
           audio: isAudioEnabled,
-        });
+        };
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        } catch (error) {
+          console.warn(
+            "Gelen aramada kamera veya mikrofon erişim hatası:",
+            error
+          );
+          Swal.fire({
+            icon: "warning",
+            title: "Kamera/Mikrofon Erişilemiyor",
+            text: `Gelen görüntülü arama için kamera veya mikrofona erişilemedi. Sesli yanıtlanıyor. Hata: ${error.message}`,
+          });
+          setIsVideoEnabled(false);
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: isAudioEnabled,
+          });
+        }
 
-        // AudioContext + GainNode
         audioContextRef.current = new AudioContext();
         gainNodeRef.current = audioContextRef.current.createGain();
         gainNodeRef.current.gain.value = micVolume / 100;
@@ -325,7 +332,7 @@ function VideoCall({
 
         if (audioTracks.length > 0) {
           const audioSource = audioContextRef.current.createMediaStreamSource(
-            new MediaStream([audioTracks[0]])
+            new MediaStream(audioTracks)
           );
           audioSource.connect(gainNodeRef.current);
         }
@@ -336,7 +343,7 @@ function VideoCall({
 
         const combinedStream = new MediaStream([
           ...destination.stream.getAudioTracks(),
-          ...videoTracks,
+          ...(isVideoEnabled ? videoTracks : []),
         ]);
 
         if (localVideoRef.current) {
@@ -369,11 +376,13 @@ function VideoCall({
 
         await peerConnection.setRemoteDescription(offer);
 
-        // Yanıt (answer) oluştur
-        const answer = await peerConnection.createAnswer();
+        const answerOptions = {
+          offerToReceiveAudio: 1,
+          offerToReceiveVideo: isVideoEnabled ? 1 : 0,
+        };
+        const answer = await peerConnection.createAnswer(answerOptions);
         await peerConnection.setLocalDescription(answer);
 
-        // Karşı tarafa answer gönder
         socket.emit("answer", {
           target: from,
           answer: answer,
@@ -384,7 +393,7 @@ function VideoCall({
         console.error("Teklif işlenirken hata:", error);
         Swal.fire(
           "Hata!",
-          "Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin.",
+          `Teklif işlenirken bir hata oluştu: ${error.message}`,
           "error"
         );
       }
@@ -400,6 +409,11 @@ function VideoCall({
         await peerConnectionRef.current.setRemoteDescription(answer);
       } catch (error) {
         console.error("Cevap ayarlanırken hata:", error);
+        Swal.fire(
+          "Hata!",
+          `Cevap ayarlanırken bir hata oluştu: ${error.message}`,
+          "error"
+        );
       }
     };
 
@@ -410,12 +424,18 @@ function VideoCall({
         return;
       }
       try {
-        // Bağlantı kapalı değilse ICE adayı ekle
         if (peerConnectionRef.current.signalingState !== "closed") {
           await peerConnectionRef.current.addIceCandidate(candidate);
+        } else {
+          console.warn("ICE adayı alınırken bağlantı kapalı.", data);
         }
       } catch (error) {
         console.error("ICE adayı eklenirken hata:", error);
+        Swal.fire(
+          "Uyarı!",
+          `ICE adayı eklenirken bir hata oluştu: ${error.message}`,
+          "warning"
+        );
       }
     };
 
@@ -523,7 +543,6 @@ function VideoCall({
                 borderRadius: "1.5rem",
               }}
             />
-            {/* Video kapalıyken gösterilecek ikon */}
             {!isVideoEnabled && (
               <div
                 className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 rounded-md"
@@ -546,14 +565,13 @@ function VideoCall({
               ref={remoteVideoRef}
               autoPlay
               className="absolute top-0 left-0 w-full h-full object-cover rounded-md"
-              muted={isRemoteAudioMuted} // local tarafta susturma
+              muted={isRemoteAudioMuted}
               style={{ borderRadius: "1.5rem" }}
             />
           </div>
 
           {/* Butonlar */}
           <div className="flex justify-around items-center mt-2">
-            {/* Mik.mute/unmute */}
             <button
               onClick={toggleAudio}
               className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
@@ -568,7 +586,6 @@ function VideoCall({
               />
             </button>
 
-            {/* Video aç/kapa */}
             <button
               onClick={toggleVideo}
               className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
@@ -581,7 +598,6 @@ function VideoCall({
               <FontAwesomeIcon icon={isVideoEnabled ? faVideo : faVideoSlash} />
             </button>
 
-            {/* Arama başlat/bitir */}
             {isAudioCallEnabled && (
               <button
                 onClick={isCallActive ? endCall : startCall}
@@ -596,7 +612,6 @@ function VideoCall({
               </button>
             )}
 
-            {/* Remote Mute */}
             {showVideoCall && targetUserId && (
               <button
                 onClick={toggleRemoteMute}
