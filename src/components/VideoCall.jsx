@@ -160,12 +160,7 @@ function VideoCall({
 
     try {
       const mediaConstraints = {
-        video: isVideoEnabled
-          ? {
-              width: { min: 640, ideal: 1920 },
-              height: { min: 480, ideal: 1080 },
-            }
-          : false,
+        video: isVideoEnabled,
         audio: isAudioEnabled,
       };
       let stream;
@@ -306,12 +301,7 @@ function VideoCall({
 
       try {
         const mediaConstraints = {
-          video: isVideoEnabled
-            ? {
-                width: { min: 640, ideal: 1920 },
-                height: { min: 480, ideal: 1080 },
-              }
-            : false,
+          video: isVideoEnabled,
           audio: isAudioEnabled,
         };
         let stream;

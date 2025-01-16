@@ -261,7 +261,7 @@ function VideoPlayer({
       {/* VideoCall Butonu */}
       <button
         onClick={toggleVideoCall}
-        className={`absolute top-2 right-12 bg-blue-800 hover:bg-blue-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
+        className={`absolute top-2 right-2 bg-blue-800 hover:bg-blue-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
         style={{ zIndex: 100, borderRadius: "1.5rem" }}
@@ -269,7 +269,7 @@ function VideoPlayer({
         <FontAwesomeIcon icon={faVideoIcon} />
       </button>
       {/* Arama Butonu */}
-      <button
+      {/* <button
         onClick={requestVideoCall}
         className={`absolute top-2 right-2 bg-green-800 hover:bg-green-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
           showControls ? "opacity-100" : "opacity-0"
@@ -277,7 +277,7 @@ function VideoPlayer({
         style={{ zIndex: 100, borderRadius: "1.5rem" }}
       >
         <FontAwesomeIcon icon={faPhoneIcon} />
-      </button>
+      </button> */}
 
       {/* VideoCall bileşeni */}
       {showVideoCall && otherUserId && (
