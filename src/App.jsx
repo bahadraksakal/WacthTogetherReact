@@ -394,6 +394,7 @@ function App() {
               <FileUpload
                 onUploadSuccess={handleFileUploadSuccess}
                 disabled={isUploading}
+                socket={socket}
               />
               <VideoList
                 videos={availableVideos}

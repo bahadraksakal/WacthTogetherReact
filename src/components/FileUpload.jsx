@@ -1,5 +1,5 @@
 // components/FileUpload.jsx
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faUpload } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
@@ -9,7 +9,7 @@ import { ClipLoader } from "react-spinners";
 
 library.add(faUpload);
 
-function FileUpload({ onUploadSuccess, disabled }) {
+function FileUpload({ onUploadSuccess, disabled, socket }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -100,35 +100,35 @@ function FileUpload({ onUploadSuccess, disabled }) {
 
   return (
     <div className="space-y-2">
-      <input
-        type="file"
-        id="videoUpload"
-        accept=".mp4,.avi,.mkv"
-        onChange={handleFileChange}
-        className="hidden"
-        disabled={disabled || uploading}
-      />
-      <button
-        type="button"
-        className={`bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
-          disabled || uploading ? "opacity-50 cursor-not-allowed" : ""
-        }`}
-        onClick={() => document.getElementById("videoUpload").click()}
-        disabled={disabled || uploading}
-        style={{ borderRadius: "1.5rem" }}
-      >
-        <FontAwesomeIcon icon={faUpload} className="mr-2" />
-        {uploading || disabled ? (
-          <ClipLoader color="#ffffff" size={20} />
-        ) : (
-          "Video Yükle"
+      <div className="flex items-center space-x-2">
+        <input
+          type="file"
+          id="videoUpload"
+          accept=".mp4,.avi,.mkv"
+          onChange={handleFileChange}
+          className="hidden"
+          disabled={disabled || uploading}
+        />
+        <button
+          type="button"
+          className={`bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ${
+            disabled || uploading ? "opacity-50 cursor-not-allowed" : ""
+          }`}
+          onClick={() => document.getElementById("videoUpload").click()}
+          disabled={disabled || uploading}
+          style={{ borderRadius: "1.5rem" }}
+        >
+          <FontAwesomeIcon icon={faUpload} className="mr-2" />
+          {uploading || disabled ? (
+            <ClipLoader color="#ffffff" size={20} />
+          ) : (
+            "Video Yükle"
+          )}
+        </button>
+        {errorMessage && (
+          <p className="text-red-500 text-sm mt-1">{errorMessage}</p>
         )}
-      </button>
-      {errorMessage && (
-        <p className="text-red-500 text-sm mt-1">{errorMessage}</p>
-      )}
-      {(selectedFile || disabled) && (
-        <div className="flex items-center space-x-2 mt-2">
+        {(selectedFile || disabled) && (
           <button
             type="button"
             className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2"
@@ -138,46 +138,36 @@ function FileUpload({ onUploadSuccess, disabled }) {
           >
             {uploading || disabled ? "Yükleniyor..." : "Yüklemeyi Onayla"}
           </button>
-          {uploading && (
-            <div className="flex items-center space-x-2">
-              <div className="w-20 h-2 bg-gray-300 rounded-full relative overflow-hidden">
-                <div
-                  className="h-full bg-green-500 rounded-full"
-                  style={{ width: `${progress}%` }}
-                />
-                <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-800 text-xs font-semibold">
-                  {progress}%
-                </span>
-              </div>
-              <span className="text-sm font-semibold text-gray-500">
-                {speed} kb/s
-              </span>
-            </div>
-          )}
-          {uploading && (
-            <span className="text-sm font-semibold text-gray-500">
-              Kalan: {remaining}%
+        )}
+      </div>
+      {uploading && (
+        <div className="flex items-center space-x-2 py-2 px-4">
+          <div className="w-20 h-2 bg-gray-300 rounded-full relative overflow-hidden">
+            <div
+              className="h-full bg-green-500 rounded-full"
+              style={{ width: `${progress}%` }}
+            />
+            <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-800 text-xs font-semibold">
+              {progress}%
             </span>
-          )}
-          {uploading && (
-            <span className="text-sm font-semibold text-gray-500">
-              {formatTime(elapsedTime)}
-            </span>
-          )}
+          </div>
+          <span className="text-sm font-semibold text-gray-500">
+            {speed} kb/s
+          </span>
         </div>
       )}
-
-      {(selectedFile || disabled) && (
-        <button
-          type="button"
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2"
-          onClick={handleSubmit}
-          disabled={disabled || uploading}
-          style={{ borderRadius: "1.5rem" }}
-        >
-          {uploading || disabled ? "Yükleniyor..." : "Yüklemeyi Onayla"}
-        </button>
-      )}
+      <div className="flex items-center space-x-2 py-2 px-4 ">
+        {uploading && (
+          <span className="text-sm font-semibold text-gray-500">
+            Kalan: {remaining}%
+          </span>
+        )}
+        {uploading && (
+          <span className="text-sm font-semibold text-gray-500">
+            {formatTime(elapsedTime)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
