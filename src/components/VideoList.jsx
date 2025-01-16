@@ -1,9 +1,17 @@
-// components/VideoList.jsx
+// Front/src/components/VideoList.jsx
 import React from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
+import { ClipLoader } from "react-spinners";
 
-function VideoList({ videos, onSelect, onDelete }) {
+function VideoList({ videos, onSelect, onDelete, loading }) {
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-32">
+        <ClipLoader color="#a0aec0" size={30} />
+      </div>
+    );
+  }
   return (
     <div>
       <h3 className="text-lg font-semibold mb-2">Mevcut Videolar</h3>

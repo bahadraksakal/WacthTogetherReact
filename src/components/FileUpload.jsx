@@ -5,6 +5,7 @@ import { faUpload } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import { url } from "../utils";
 import Swal from "sweetalert2";
+import { ClipLoader } from "react-spinners";
 
 library.add(faUpload);
 
@@ -75,12 +76,12 @@ function FileUpload({ onUploadSuccess, disabled }) {
         style={{ borderRadius: "1.5rem" }}
       >
         <FontAwesomeIcon icon={faUpload} className="mr-2" />
-        {uploading ? "Yükleniyor..." : "Video Yükle"}
+        {uploading ? <ClipLoader color="#ffffff" size={20} /> :  "Video Yükle"}
       </button>
-      {errorMessage && (
+        {errorMessage && (
         <p className="text-red-500 text-sm mt-1">{errorMessage}</p>
       )}
-      {selectedFile && (
+         {selectedFile && (
         <button
           type="button"
           className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2"
@@ -94,5 +95,4 @@ function FileUpload({ onUploadSuccess, disabled }) {
     </div>
   );
 }
-
 export default FileUpload;

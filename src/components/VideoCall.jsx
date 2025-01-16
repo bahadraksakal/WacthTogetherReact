@@ -160,7 +160,12 @@ function VideoCall({
 
     try {
       const mediaConstraints = {
-        video: isVideoEnabled,
+        video: isVideoEnabled
+          ? {
+              width: { min: 640, ideal: 1920 },
+              height: { min: 480, ideal: 1080 },
+            }
+          : false,
         audio: isAudioEnabled,
       };
       let stream;
@@ -301,7 +306,12 @@ function VideoCall({
 
       try {
         const mediaConstraints = {
-          video: isVideoEnabled,
+          video: isVideoEnabled
+            ? {
+                width: { min: 640, ideal: 1920 },
+                height: { min: 480, ideal: 1080 },
+              }
+            : false,
           audio: isAudioEnabled,
         };
         let stream;
@@ -438,7 +448,9 @@ function VideoCall({
         );
       }
     };
-
+    socket.on("error", (errorMessage) => {
+      Swal.fire("Hata!", `Bir hata oluştu: ${errorMessage}`, "error");
+    });
     socket.on("offer", handleOffer);
     socket.on("answer", handleAnswer);
     socket.on("ice-candidate", handleIceCandidate);
@@ -447,6 +459,7 @@ function VideoCall({
       socket.off("offer", handleOffer);
       socket.off("answer", handleAnswer);
       socket.off("ice-candidate", handleIceCandidate);
+      socket.off("error");
     };
   }, [
     socket,

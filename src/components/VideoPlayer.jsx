@@ -164,6 +164,9 @@ function VideoPlayer({
           className="w-full h-full bg-black cursor-pointer object-contain"
           onTimeUpdate={handleTimeUpdate}
           onClick={handlePlayPause}
+          style={{
+            objectFit: "contain",
+          }}
         />
       )}
 

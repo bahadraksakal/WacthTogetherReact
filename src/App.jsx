@@ -45,6 +45,7 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const loadingBarRef = useRef(null);
   const socketLoadingBarRef = useRef(null);
+  const [videoListLoading, setVideoListLoading] = useState(false);
 
   // Socket bağlantılarını yönet
   useEffect(() => {
@@ -101,6 +102,7 @@ function App() {
     // Video listesi
     socket.on("available-videos", (videos) => {
       setAvailableVideos(videos);
+      setVideoListLoading(false); // Video listesi yüklendiğinde loadingi kapat
     });
 
     // Başka kullanıcı tarafından video seçilince
@@ -109,6 +111,16 @@ function App() {
       setUploadedVideo(`${url}/videos/${filename}`);
       setShowSidebar(true);
     });
+
+    // Başka kullanıcı tarafından video silinince
+    socket.on("video-deleted", (filename) => {
+      setAvailableVideos((prevVideos) =>
+      prevVideos.filter((video) => video !== filename)
+      );
+      if (uploadedVideo === `${url}/videos/${filename}`) {
+      setUploadedVideo(null);
+      }
+  });
 
     // Mevcut video durumu
     socket.on("video-state", (state) => {
@@ -280,6 +292,7 @@ function App() {
             if (uploadedVideo === `${url}/videos/${filename}`) {
               setUploadedVideo(null);
             }
+            socket.emit("video-deleted", filename); // Soketle bildir
             Swal.fire("Silindi!", "Video başarıyla silindi.", "success");
           } else {
             const errorData = await response.json();
@@ -387,6 +400,7 @@ function App() {
                 videos={availableVideos}
                 onSelect={handleSelectVideo}
                 onDelete={handleVideoDelete}
+                loading={videoListLoading} // VideoList bileşenine loading propunu gönder
               />
             </aside>
           )}
