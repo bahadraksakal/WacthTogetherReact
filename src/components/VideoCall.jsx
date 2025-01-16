@@ -1,4 +1,3 @@
-// Front/src/components/VideoCall.js
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -38,6 +37,8 @@ library.add(
 
 const initialWidth = 320;
 const initialHeight = 480;
+const remoteVideoWidth = 160; // Sabit genişlik değeri
+const remoteVideoHeight = 120; // Sabit yükseklik değeri
 
 function VideoCall({
   socket,
@@ -46,54 +47,51 @@ function VideoCall({
   showVideoCall,
   isFullScreen,
   isAudioCallEnabled,
-  targetUserId,
   startWithAudio,
   startWithVideo,
 }) {
   const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const peerConnectionRef = useRef(null);
+  const remoteVideosRef = useRef({}); // Birden fazla uzaktan video için ref
+  const localStreamRef = useRef(null);
+  const [remoteUsersMedia, setRemoteUsersMedia] = useState({}); // Uzak kullanıcıların medya durumları
 
-  const [isAudioEnabled, setIsAudioEnabled] = useState(startWithAudio);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(startWithVideo);
+  const [hasLocalAudio, setHasLocalAudio] = useState(startWithAudio);
+  const [hasLocalVideo, setHasLocalVideo] = useState(startWithVideo);
   const [isExpanded, setIsExpanded] = useState(false);
   const [dimensions, setDimensions] = useState({
     width: initialWidth,
     height: initialHeight,
   });
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState(false);
-
+  const [isCallActive, setIsCallActive] = useState(false); // Artık sadece yerel medya açık/kapalı durumunu gösterir
+  const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState({}); // Her kullanıcı için ayrı mute durumu
   const [micVolume, setMicVolume] = useState(100);
-  const [remoteVolume, setRemoteVolume] = useState(100);
-
+  const [remoteVolume, setRemoteVolume] = useState({}); // Her kullanıcı için ayrı ses seviyesi
   const audioContextRef = useRef(null);
   const gainNodeRef = useRef(null);
 
-  const configuration = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      // Ek ICE sunucuları eklenebilir
-    ],
-  };
-
   const toggleAudio = useCallback(() => {
-    setIsAudioEnabled((prev) => !prev);
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject
+    const newAudioState = !hasLocalAudio;
+    setHasLocalAudio(newAudioState);
+    if (localStreamRef.current) {
+      localStreamRef.current
         .getAudioTracks()
-        .forEach((track) => (track.enabled = !track.enabled));
+        .forEach((track) => (track.enabled = newAudioState));
     }
-  }, []);
+    socket.emit("toggle-media", { audio: newAudioState, video: hasLocalVideo });
+    console.log(`Yerel mikrofon ${newAudioState ? "açıldı" : "kapandı"}`);
+  }, [hasLocalAudio, hasLocalVideo, socket]);
 
   const toggleVideo = useCallback(() => {
-    setIsVideoEnabled((prev) => !prev);
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject
+    const newVideoState = !hasLocalVideo;
+    setHasLocalVideo(newVideoState);
+    if (localStreamRef.current) {
+      localStreamRef.current
         .getVideoTracks()
-        .forEach((track) => (track.enabled = !track.enabled));
+        .forEach((track) => (track.enabled = newVideoState));
     }
-  }, []);
+    socket.emit("toggle-media", { audio: hasLocalAudio, video: newVideoState });
+    console.log(`Yerel kamera ${newVideoState ? "açıldı" : "kapandı"}`);
+  }, [hasLocalAudio, hasLocalVideo, socket]);
 
   const toggleExpand = useCallback(() => {
     setIsExpanded((prev) => !prev);
@@ -104,10 +102,7 @@ function VideoCall({
   }, []);
 
   const handleResize = useCallback((e, direction, ref, delta, position) => {
-    setDimensions({
-      width: ref.offsetWidth,
-      height: ref.offsetHeight,
-    });
+    setDimensions({ width: ref.offsetWidth, height: ref.offsetHeight });
   }, []);
 
   const increaseSize = useCallback(() => {
@@ -124,345 +119,117 @@ function VideoCall({
     }));
   }, []);
 
-  const toggleRemoteMute = useCallback(() => {
-    setIsRemoteAudioMuted((prev) => !prev);
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.muted = !isRemoteAudioMuted;
-    }
-  }, [isRemoteAudioMuted]);
+  const toggleRemoteMute = useCallback(
+    (socketId) => {
+      setIsRemoteAudioMuted((prev) => ({
+        ...prev,
+        [socketId]: !prev[socketId],
+      }));
+      console.log(
+        `Uzak kullanıcı ${socketId} için ses ${
+          !isRemoteAudioMuted[socketId] ? "susturuldu" : "açıldı"
+        }`
+      );
+    },
+    [isRemoteAudioMuted]
+  );
 
   const handleMicVolumeChange = useCallback((e) => {
     const value = parseInt(e.target.value, 10);
     setMicVolume(value);
-    if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = value / 100;
-    }
-  }, []);
-
-  const handleRemoteVolumeChange = useCallback((e) => {
-    const value = parseInt(e.target.value, 10);
-    setRemoteVolume(value);
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.volume = value / 100;
-    }
-  }, []);
-
-  const startCall = useCallback(async () => {
-    if (!targetUserId) {
-      Swal.fire("Uyarı!", "Bağlanacak başka bir kullanıcı yok.", "warning");
-      return;
-    }
-
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-
-    try {
-      const mediaConstraints = {
-        video: isVideoEnabled,
-        audio: isAudioEnabled,
-      };
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-      } catch (error) {
-        console.warn("Kamera veya mikrofon erişim hatası:", error);
-        Swal.fire({
-          icon: "warning",
-          title: "Kamera/Mikrofon Erişilemiyor",
-          text: `Görüntülü görüşme için kamera veya mikrofona erişilemedi. Sesli görüşme başlatılıyor. Hata: ${error.message}`,
-        });
-        setIsVideoEnabled(false); // Kamerayı kapat ve sadece sesli devam et
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: isAudioEnabled,
-        });
-      }
-
-      audioContextRef.current = new AudioContext();
-      gainNodeRef.current = audioContextRef.current.createGain();
-      gainNodeRef.current.gain.value = micVolume / 100;
-
-      const audioTracks = stream.getAudioTracks();
-      const videoTracks = stream.getVideoTracks();
-
-      if (audioTracks.length > 0) {
-        const audioSource = audioContextRef.current.createMediaStreamSource(
-          new MediaStream(audioTracks) // Use existing audio tracks
-        );
-        audioSource.connect(gainNodeRef.current);
-      }
-
-      const destination =
-        audioContextRef.current.createMediaStreamDestination();
-      gainNodeRef.current.connect(destination);
-
-      const combinedStream = new MediaStream([
-        ...destination.stream.getAudioTracks(),
-        ...(isVideoEnabled ? videoTracks : []), // Only add video tracks if enabled
-      ]);
-
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = combinedStream;
-      }
-
-      const peerConnection = new RTCPeerConnection(configuration);
-      peerConnectionRef.current = peerConnection;
-
-      combinedStream.getTracks().forEach((track) => {
-        peerConnection.addTrack(track, combinedStream);
-      });
-
-      peerConnection.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-          remoteVideoRef.current.volume = remoteVolume / 100;
-        }
-      };
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("ice-candidate", {
-            target: targetUserId,
-            candidate: event.candidate,
-          });
-        }
-      };
-
-      const offerOptions = {
-        offerToReceiveAudio: 1,
-        offerToReceiveVideo: isVideoEnabled ? 1 : 0,
-      };
-      const offer = await peerConnection.createOffer(offerOptions);
-      await peerConnection.setLocalDescription(offer);
-
-      socket.emit("offer", {
-        target: targetUserId,
-        offer: offer,
-      });
-
-      setIsCallActive(true);
-    } catch (error) {
-      console.error("Arama başlatılamadı:", error);
-      Swal.fire(
-        "Hata!",
-        `Arama başlatılırken bir hata oluştu: ${error.message}`,
-        "error"
+    if (
+      localStreamRef.current &&
+      localStreamRef.current.getAudioTracks().length > 0
+    ) {
+      const audioContext = audioContextRef.current || new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(
+        localStreamRef.current
       );
+      const gainNode = gainNodeRef.current || audioContext.createGain();
+      gainNodeRef.current = gainNode;
+      gainNode.gain.value = value / 100;
+      source.connect(gainNode);
+      gainNode.connect(audioContext.destination);
     }
-  }, [
-    socket,
-    targetUserId,
-    configuration,
-    isVideoEnabled,
-    isAudioEnabled,
-    micVolume,
-    remoteVolume,
-  ]);
-
-  const endCall = useCallback(() => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    if (remoteVideoRef.current && remoteVideoRef.current.srcObject) {
-      remoteVideoRef.current.srcObject
-        .getTracks()
-        .forEach((track) => track.stop());
-      remoteVideoRef.current.srcObject = null;
-    }
-    if (localVideoRef.current && localVideoRef.current.srcObject) {
-      localVideoRef.current.srcObject
-        .getTracks()
-        .forEach((track) => track.stop());
-      localVideoRef.current.srcObject = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    gainNodeRef.current = null;
-    setIsCallActive(false);
   }, []);
+
+  const handleRemoteVolumeChange = useCallback((socketId, value) => {
+    setRemoteVolume((prev) => ({ ...prev, [socketId]: value }));
+    // Uzak video elementinin sesini ayarla
+    if (remoteVideosRef.current[socketId]) {
+      remoteVideosRef.current[socketId].volume = value / 100;
+    }
+  }, []);
+
+  const toggleCall = useCallback(async () => {
+    setIsCallActive((prevState) => !prevState);
+    if (!isCallActive) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: hasLocalAudio,
+          video: hasLocalVideo,
+        });
+        localStreamRef.current = stream;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      } catch (error) {
+        console.error("Görüşme başlatılamadı:", error);
+        Swal.fire(
+          "Hata",
+          `Görüşme başlatılırken hata oluştu: ${error.message}`,
+          "error"
+        );
+        setIsCallActive(false); // Hata durumunda butonu geri al
+      }
+    } else {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
+        localStreamRef.current = null;
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = null;
+        }
+      }
+    }
+  }, [isCallActive, hasLocalAudio, hasLocalVideo]);
 
   useEffect(() => {
-    const handleOffer = async (data) => {
-      const { from, offer } = data;
-      if (!from) {
-        console.error("Teklif gönderen yok.");
-        return;
-      }
-
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-
-      try {
-        const mediaConstraints = {
-          video: isVideoEnabled,
-          audio: isAudioEnabled,
-        };
-        let stream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-        } catch (error) {
-          console.warn(
-            "Gelen aramada kamera veya mikrofon erişim hatası:",
-            error
-          );
-          Swal.fire({
-            icon: "warning",
-            title: "Kamera/Mikrofon Erişilemiyor",
-            text: `Gelen görüntülü arama için kamera veya mikrofona erişilemedi. Sesli yanıtlanıyor. Hata: ${error.message}`,
-          });
-          setIsVideoEnabled(false);
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: isAudioEnabled,
-          });
-        }
-
-        audioContextRef.current = new AudioContext();
-        gainNodeRef.current = audioContextRef.current.createGain();
-        gainNodeRef.current.gain.value = micVolume / 100;
-
-        const audioTracks = stream.getAudioTracks();
-        const videoTracks = stream.getVideoTracks();
-
-        if (audioTracks.length > 0) {
-          const audioSource = audioContextRef.current.createMediaStreamSource(
-            new MediaStream(audioTracks)
-          );
-          audioSource.connect(gainNodeRef.current);
-        }
-
-        const destination =
-          audioContextRef.current.createMediaStreamDestination();
-        gainNodeRef.current.connect(destination);
-
-        const combinedStream = new MediaStream([
-          ...destination.stream.getAudioTracks(),
-          ...(isVideoEnabled ? videoTracks : []),
-        ]);
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = combinedStream;
-        }
-
-        const peerConnection = new RTCPeerConnection(configuration);
-        peerConnectionRef.current = peerConnection;
-
-        combinedStream.getTracks().forEach((track) => {
-          peerConnection.addTrack(track, combinedStream);
-        });
-
-        peerConnection.ontrack = (event) => {
-          const remoteStream = event.streams[0];
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = remoteStream;
-            remoteVideoRef.current.volume = remoteVolume / 100;
-          }
-        };
-
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) {
-            socket.emit("ice-candidate", {
-              target: from,
-              candidate: event.candidate,
-            });
-          }
-        };
-
-        await peerConnection.setRemoteDescription(offer);
-
-        const answerOptions = {
-          offerToReceiveAudio: 1,
-          offerToReceiveVideo: isVideoEnabled ? 1 : 0,
-        };
-        const answer = await peerConnection.createAnswer(answerOptions);
-        await peerConnection.setLocalDescription(answer);
-
-        socket.emit("answer", {
-          target: from,
-          answer: answer,
-        });
-
-        setIsCallActive(true);
-      } catch (error) {
-        console.error("Teklif işlenirken hata:", error);
-        Swal.fire(
-          "Hata!",
-          `Teklif işlenirken bir hata oluştu: ${error.message}`,
-          "error"
-        );
-      }
-    };
-
-    const handleAnswer = async (data) => {
-      const { from, answer } = data;
-      if (!from || !peerConnectionRef.current) {
-        console.error("Cevap gönderen yok veya aktif bir bağlantı yok.");
-        return;
-      }
-      try {
-        await peerConnectionRef.current.setRemoteDescription(answer);
-      } catch (error) {
-        console.error("Cevap ayarlanırken hata:", error);
-        Swal.fire(
-          "Hata!",
-          `Cevap ayarlanırken bir hata oluştu: ${error.message}`,
-          "error"
-        );
-      }
-    };
-
-    const handleIceCandidate = async (data) => {
-      const { from, candidate } = data;
-      if (!from || !peerConnectionRef.current) {
-        console.error("ICE candidate hedefi yok veya aktif bağlantı yok.");
-        return;
-      }
-      try {
-        if (peerConnectionRef.current.signalingState !== "closed") {
-          await peerConnectionRef.current.addIceCandidate(candidate);
-        } else {
-          console.warn("ICE adayı alınırken bağlantı kapalı.", data);
-        }
-      } catch (error) {
-        console.error("ICE adayı eklenirken hata:", error);
-        Swal.fire(
-          "Uyarı!",
-          `ICE adayı eklenirken bir hata oluştu: ${error.message}`,
-          "warning"
-        );
-      }
-    };
-    socket.on("error", (errorMessage) => {
-      Swal.fire("Hata!", `Bir hata oluştu: ${errorMessage}`, "error");
+    socket.on("user-joined", (user) => {
+      console.log(`Yeni kullanıcı katıldı: ${user.username} (ID: ${user.id})`);
     });
-    socket.on("offer", handleOffer);
-    socket.on("answer", handleAnswer);
-    socket.on("ice-candidate", handleIceCandidate);
+
+    socket.on("user-left", (socketId) => {
+      console.log(`Kullanıcı ayrıldı: ${socketId}`);
+      setRemoteUsersMedia((prev) => {
+        const newState = { ...prev };
+        delete newState[socketId];
+        return newState;
+      });
+      delete remoteVideosRef.current[socketId];
+    });
+
+    socket.on("remote-media-toggled", ({ socketId, audio, video }) => {
+      console.log(
+        `Uzak kullanıcı medya değiştirdi - ID: ${socketId}, Ses: ${audio}, Video: ${video}`
+      );
+      setRemoteUsersMedia((prev) => ({
+        ...prev,
+        [socketId]: { audio, video },
+      }));
+    });
 
     return () => {
-      socket.off("offer", handleOffer);
-      socket.off("answer", handleAnswer);
-      socket.off("ice-candidate", handleIceCandidate);
-      socket.off("error");
+      socket.off("user-joined");
+      socket.off("user-left");
+      socket.off("remote-media-toggled");
     };
-  }, [
-    socket,
-    configuration,
-    isVideoEnabled,
-    isAudioEnabled,
-    micVolume,
-    remoteVolume,
-  ]);
+  }, [socket]);
 
-  if (isHidden) {
-    return null;
-  }
+  useEffect(() => {
+    // Bağlantı kurulduğunda kendi medya durumunu gönder
+    socket.emit("toggle-media", { audio: hasLocalAudio, video: hasLocalVideo });
+  }, [socket, hasLocalAudio, hasLocalVideo]);
 
   return (
     <Rnd
@@ -531,46 +298,70 @@ function VideoCall({
         </div>
 
         <div className="p-2 flex flex-col h-[calc(100%-42px)]">
-          {/* Local Video */}
-          <div
-            className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2"
-            style={{ borderRadius: "1.5rem" }}
-          >
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              className="absolute top-0 left-0 w-full h-full object-cover rounded-md"
-              style={{
-                display: isVideoEnabled ? "block" : "none",
-                borderRadius: "1.5rem",
-              }}
-            />
-            {!isVideoEnabled && (
-              <div
-                className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 rounded-md"
-                style={{ borderRadius: "1.5rem" }}
-              >
-                <FontAwesomeIcon
-                  icon={faVideoSlash}
-                  className="text-white text-4xl"
-                />
-              </div>
-            )}
+          <div className="mt-2">
+            <div className="flex overflow-x-auto">
+              {Object.entries(remoteUsersMedia).map(([socketId, media]) => (
+                <div
+                  key={socketId}
+                  className="relative w-full h-1/2 bg-gray-900 object-cover rounded-md mb-2"
+                  style={{
+                    borderRadius: "1.5rem",
+                    width: `${remoteVideoWidth * 2}px`,
+                    height: `${remoteVideoHeight * 2}px`,
+                  }}
+                >
+                  <video
+                    ref={(el) => (remoteVideosRef.current[socketId] = el)}
+                    autoPlay
+                    muted={isRemoteAudioMuted[socketId]}
+                    className="relative top-0 left-0 w-full h-full object-cover rounded-md"
+                    style={{
+                      borderRadius: "1.5rem",
+                      display: media.video ? "block" : "none",
+                    }}
+                  />
+                  {!media.video && (
+                    <div
+                      className="relative top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 rounded-md"
+                      style={{ borderRadius: "1.5rem" }}
+                    >
+                      <FontAwesomeIcon
+                        icon={faVideoSlash}
+                        className="text-white text-2xl"
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-
-          {/* Remote Video */}
-          <div
-            className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2"
-            style={{ borderRadius: "1.5rem" }}
-          >
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              className="absolute top-0 left-0 w-full h-full object-cover rounded-md"
-              muted={isRemoteAudioMuted}
-              style={{ borderRadius: "1.5rem" }}
-            />
+          {/* Remote Videos */}
+          <div className="mt-2">
+            <div className="flex overflow-x-auto">
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted={!hasLocalAudio}
+                className="relative top-50 left-50 w-full h-full object-cover rounded-md"
+                style={{
+                  display: hasLocalVideo ? "block" : "none",
+                  borderRadius: "1.5rem",
+                  width: `${remoteVideoWidth}px`,
+                  height: `${remoteVideoHeight}px`,
+                }}
+              />
+              {!hasLocalVideo && (
+                <div
+                  className="relative top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 rounded-md"
+                  style={{ borderRadius: "1.5rem" }}
+                >
+                  <FontAwesomeIcon
+                    icon={faVideoSlash}
+                    className="text-white text-4xl"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Butonlar */}
@@ -578,63 +369,60 @@ function VideoCall({
             <button
               onClick={toggleAudio}
               className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
-                isAudioEnabled
+                hasLocalAudio
                   ? "bg-green-800 text-green-200"
                   : "bg-red-800 text-red-200"
               }`}
               style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon
-                icon={isAudioEnabled ? faMicrophone : faMicrophoneSlash}
+                icon={hasLocalAudio ? faMicrophone : faMicrophoneSlash}
               />
             </button>
-
             <button
               onClick={toggleVideo}
               className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
-                isVideoEnabled
+                hasLocalVideo
                   ? "bg-green-800 text-green-200"
                   : "bg-red-800 text-red-200"
               }`}
               style={{ borderRadius: "1.5rem" }}
             >
-              <FontAwesomeIcon icon={isVideoEnabled ? faVideo : faVideoSlash} />
+              <FontAwesomeIcon icon={hasLocalVideo ? faVideo : faVideoSlash} />
             </button>
-
-            {isAudioCallEnabled && (
+            <button
+              onClick={toggleCall}
+              className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
+                isCallActive
+                  ? "bg-green-800 text-green-200"
+                  : "bg-gray-500 text-white"
+              }`}
+              style={{ borderRadius: "1.5rem" }}
+            >
+              <FontAwesomeIcon icon={isCallActive ? faPhone : faPhoneSlash} />
+            </button>
+            {Object.keys(remoteUsersMedia).map((socketId) => (
               <button
-                onClick={isCallActive ? endCall : startCall}
+                key={socketId}
+                onClick={() => toggleRemoteMute(socketId)}
                 className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
-                  isCallActive
-                    ? "bg-red-800 text-red-200"
-                    : "bg-green-800 text-green-200"
-                }`}
-                style={{ borderRadius: "1.5rem" }}
-              >
-                <FontAwesomeIcon icon={isCallActive ? faPhoneSlash : faPhone} />
-              </button>
-            )}
-
-            {showVideoCall && targetUserId && (
-              <button
-                onClick={toggleRemoteMute}
-                className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
-                  isRemoteAudioMuted
+                  isRemoteAudioMuted[socketId]
                     ? "bg-yellow-800 text-yellow-200"
                     : "bg-blue-800 text-blue-200"
                 }`}
                 style={{ borderRadius: "1.5rem" }}
               >
                 <FontAwesomeIcon
-                  icon={isRemoteAudioMuted ? faVolumeMute : faVolumeUp}
+                  icon={
+                    isRemoteAudioMuted[socketId] ? faVolumeMute : faVolumeUp
+                  }
                 />
               </button>
-            )}
+            ))}
           </div>
 
           {/* Volume Sliders */}
           <div className="flex flex-col mt-6 mb-6 px-2 space-y-4 text-center text-gray-300">
-            {/* Mikrofon Ses */}
             <label className="text-sm font-semibold">
               Mikrofon Ses (0-100)
             </label>
@@ -648,17 +436,28 @@ function VideoCall({
               style={{ borderRadius: "1.5rem" }}
             />
 
-            {/* Karşı Tarafın Sesi */}
-            <label className="text-sm font-semibold">Karşı Taraf (0-100)</label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={remoteVolume}
-              onChange={handleRemoteVolumeChange}
-              className="bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
-              style={{ borderRadius: "1.5rem" }}
-            />
+            {/* Remote Users Volume Sliders */}
+            {Object.keys(remoteUsersMedia).map((socketId) => (
+              <div key={socketId}>
+                <label className="text-sm font-semibold">
+                  {socketId} Ses (0-100)
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={remoteVolume[socketId] || 100}
+                  onChange={(e) =>
+                    handleRemoteVolumeChange(
+                      socketId,
+                      parseInt(e.target.value, 10)
+                    )
+                  }
+                  className="bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  style={{ borderRadius: "1.5rem" }}
+                />
+              </div>
+            ))}
           </div>
         </div>
       </div>

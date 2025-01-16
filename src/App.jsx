@@ -85,13 +85,11 @@ function App() {
 
     socket.on("user-joined", (data) => {
       console.log("Yeni kullanıcı katıldı:", data);
-      // setUserCount((prevCount) => prevCount + 1);
       setOtherUserId(data.id);
     });
 
     socket.on("user-left", (socketId) => {
       console.log("Kullanıcı ayrıldı:", socketId);
-      // setUserCount((prevCount) => Math.max(0, prevCount - 1));
       if (socketId === otherUserId) {
         setShowVideoCall(false);
         setOtherUserId(null);
@@ -101,7 +99,7 @@ function App() {
     // Video listesi
     socket.on("available-videos", (videos) => {
       setAvailableVideos(videos);
-      setVideoListLoading(false); // Video listesi yüklendiğinde loadingi kapat
+      setVideoListLoading(false);
     });
 
     // Başka kullanıcı tarafından video seçilince
@@ -195,9 +193,7 @@ function App() {
 
     socket.on("volume-change", (volume) => {
       setVolume(volume);
-      if (videoRef.current) {
-        videoRef.current.volume = volume;
-      }
+      socket.emit("volume-change", volume);
     });
 
     socket.on("upload-start", () => {
