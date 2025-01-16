@@ -7,14 +7,20 @@ function VideoList({ videos, onSelect, onDelete }) {
   return (
     <div>
       <h3 className="text-lg font-semibold mb-2">Mevcut Videolar</h3>
-      <ul>
+      <ul className="space-y-2">
         {videos &&
           videos.map((video, index) => (
             <li
               key={index}
               className="flex items-center justify-between cursor-pointer hover:bg-gray-100 p-2 rounded"
+              style={{ borderRadius: "1.5rem" }}
             >
-              <span onClick={() => onSelect(video)}>{video}</span>
+              <span
+                onClick={() => onSelect(video)}
+                className="block w-full truncate hover:underline"
+              >
+                {video}
+              </span>
               <button
                 onClick={() => onDelete(video)}
                 className="text-red-500 hover:text-red-700 focus:outline-none"

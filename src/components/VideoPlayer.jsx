@@ -10,6 +10,7 @@ import {
   faCompress,
   faFolderOpen,
   faVideo as faVideoIcon,
+  faPhone as faPhoneIcon,
 } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import VideoCall from "./VideoCall";
@@ -22,7 +23,8 @@ library.add(
   faExpand,
   faCompress,
   faFolderOpen,
-  faVideoIcon
+  faVideoIcon,
+  faPhoneIcon
 );
 
 // Yardımcı fonksiyon: zaman formatlama
@@ -52,6 +54,7 @@ function VideoPlayer({
   socket,
   isAudioCallEnabled,
   otherUserId,
+  requestVideoCall,
 }) {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -152,6 +155,7 @@ function VideoPlayer({
       className="bg-gray-800 rounded-md shadow-lg overflow-hidden relative h-[calc(100vh-6vh)]"
       onMouseMove={handleMouseMove}
       id="video-call-comp"
+      style={{ borderRadius: "1.5rem" }}
     >
       {videoUrl && (
         <video
@@ -168,6 +172,10 @@ function VideoPlayer({
         className={`p-4 flex items-center absolute bottom-0 left-0 w-full bg-gray-800 bg-opacity-75 transition-opacity duration-300 ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
+        style={{
+          borderBottomLeftRadius: "1.5rem",
+          borderBottomRightRadius: "1.5rem",
+        }}
       >
         <div className="flex items-center space-x-4 flex-grow">
           {/* Play/Pause */}
@@ -189,7 +197,7 @@ function VideoPlayer({
             />
           </button>
 
-          {/* Volume Slider (0 - 1) */}
+          {/* Volume Slider (0 - 1 arası) */}
           <input
             type="range"
             min="0"
@@ -198,6 +206,7 @@ function VideoPlayer({
             value={volume}
             onChange={handleVolumeChangeLocal}
             className="w-16"
+            style={{ borderRadius: "1.5rem" }}
           />
 
           {/* Current Time */}
@@ -214,6 +223,7 @@ function VideoPlayer({
             value={videoRef.current?.currentTime || 0}
             onChange={handleSeekChange}
             className="flex-grow"
+            style={{ borderRadius: "1.5rem" }}
           />
 
           {/* Duration */}
@@ -240,7 +250,7 @@ function VideoPlayer({
         className={`absolute top-2 left-2 bg-purple-800 hover:bg-purple-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
-        style={{ zIndex: 100 }}
+        style={{ zIndex: 100, borderRadius: "1.5rem" }}
       >
         <FontAwesomeIcon icon={faFolderOpen} />
       </button>
@@ -248,13 +258,24 @@ function VideoPlayer({
       {/* VideoCall Butonu */}
       <button
         onClick={toggleVideoCall}
-        className={`absolute top-2 right-2 bg-blue-800 hover:bg-blue-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
+        className={`absolute top-2 right-12 bg-blue-800 hover:bg-blue-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
-        style={{ zIndex: 100 }}
+        style={{ zIndex: 100, borderRadius: "1.5rem" }}
       >
         <FontAwesomeIcon icon={faVideoIcon} />
       </button>
+      {/* Arama Butonu */}
+      <button
+        onClick={requestVideoCall}
+        className={`absolute top-2 right-2 bg-green-800 hover:bg-green-900 text-white font-bold py-1 px-2 rounded-full focus:outline-none shadow z-[100] text-sm ${
+          showControls ? "opacity-100" : "opacity-0"
+        }`}
+        style={{ zIndex: 100, borderRadius: "1.5rem" }}
+      >
+        <FontAwesomeIcon icon={faPhoneIcon} />
+      </button>
+
       {/* VideoCall bileşeni */}
       {showVideoCall && otherUserId && (
         <VideoCall
@@ -264,16 +285,6 @@ function VideoPlayer({
           isAudioCallEnabled={isAudioCallEnabled}
           startWithAudio={true} // Ses varsayılan olarak açık
           startWithVideo={true} // Kamera varsayılan olarak açık
-
-          // socket={socket}
-          // isHidden={!showVideoCall}
-          // onToggle={toggleVideoCall}
-          // showVideoCall={showVideoCall}
-          // isFullScreen={isFullScreen}
-          // isAudioCallEnabled={isAudioCallEnabled}
-          // targetUserId={otherUserId}
-          // startWithAudio={true} // Başlangıçta sesli
-          // startWithVideo={true} // Başlangıçta kameralı
         />
       )}
     </div>

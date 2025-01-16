@@ -1,3 +1,4 @@
+// FrontEnd kaynak Kodları:
 // Front/src/App.js
 import React, { useState, useRef, useEffect } from "react";
 import io from "socket.io-client";
@@ -13,11 +14,13 @@ import {
   faFolderOpen,
   faPhone,
   faPhoneSlash,
-  faTrash, // Çöp kutusu ikonu eklendi
+  faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import "./index.css";
 import { url } from "./utils";
+import Swal from "sweetalert2";
+import LoadingBar from "react-top-loading-bar";
 
 library.add(faVideoIcon, faTimes, faFolderOpen, faPhone, faPhoneSlash, faTrash);
 
@@ -29,7 +32,7 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(0.5); // Videonun ses seviyesi (0.0 - 1.0)
+  const [volume, setVolume] = useState(0.5);
   const videoRef = useRef(null);
   const [userCount, setUserCount] = useState(0);
   const [availableVideos, setAvailableVideos] = useState([]);
@@ -38,29 +41,45 @@ function App() {
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [isAudioCallEnabled] = useState(true); // Bu propta değişiklik yapmak istersen
+  const [isAudioCallEnabled] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const loadingBarRef = useRef(null);
+  const socketLoadingBarRef = useRef(null);
 
   // Socket bağlantılarını yönet
   useEffect(() => {
-    socket.on("connect", () => console.log("Sunucuya bağlandı"));
+    socketLoadingBarRef.current.continuousStart();
+
+    socket.on("connect", () => {
+      console.log("Sunucuya bağlandı");
+      socketLoadingBarRef.current.complete();
+    });
     socket.on("disconnect", () => console.log("Sunucudan ayrıldı"));
     socket.on("connect_error", (err) => {
       console.error("Sunucuya bağlanırken hata oluştu:", err);
-      alert("Sunucuya bağlanırken hata oluştu, lütfen tekrar deneyin.");
+      socketLoadingBarRef.current.complete();
+      Swal.fire(
+        "Hata!",
+        "Sunucuya bağlanırken hata oluştu, lütfen tekrar deneyin.",
+        "error"
+      );
     });
-    socket.on("server-full", () => alert("Sunucu dolu!"));
+    socket.on("server-full", () =>
+      Swal.fire(
+        "Sunucu Dolu!",
+        "Şu anda sunucu dolu, lütfen daha sonra tekrar deneyin.",
+        "warning"
+      )
+    );
 
     // Kullanıcılar
-    socket.on("user-connected", (data) => {
-      console.log("Kullanıcı bağlandı:", data);
-      setUserCount((prevCount) => prevCount + 1);
-    });
-
     socket.on("existing-users", (users) => {
+      setUserCount(users.length);
       if (users.length > 0) {
-        const firstUser = users[0];
-        setOtherUserId(firstUser.id);
-        setShowVideoCall(true);
+        const firstUser = users.find((user) => user.id !== socket.id);
+        if (firstUser) {
+          setOtherUserId(firstUser.id);
+        }
       }
     });
 
@@ -68,7 +87,6 @@ function App() {
       console.log("Yeni kullanıcı katıldı:", data);
       setUserCount((prevCount) => prevCount + 1);
       setOtherUserId(data.id);
-      setShowVideoCall(true);
     });
 
     socket.on("user-left", (socketId) => {
@@ -171,12 +189,39 @@ function App() {
       }
     });
 
+    socket.on("upload-start", () => {
+      setIsUploading(true);
+      loadingBarRef.current.continuousStart();
+    });
+
+    socket.on("upload-end", () => {
+      setIsUploading(false);
+      loadingBarRef.current.complete();
+    });
+
+    socket.on("incoming-video-call", (callerId) => {
+      Swal.fire({
+        title: "Görüntülü Arama İsteği",
+        text: "Bir kullanıcı görüntülü arama yapmak istiyor. Kabul ediyor musunuz?",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonColor: "#3085d6",
+        cancelButtonColor: "#d33",
+        confirmButtonText: "Evet, Kabul Et!",
+        cancelButtonText: "Hayır",
+      }).then((result) => {
+        if (result.isConfirmed) {
+          setOtherUserId(callerId);
+          setShowVideoCall(true);
+        }
+      });
+    });
+
     return () => {
       socket.off("connect");
       socket.off("disconnect");
       socket.off("connect_error");
       socket.off("server-full");
-      socket.off("user-connected");
       socket.off("existing-users");
       socket.off("user-joined");
       socket.off("user-left");
@@ -189,6 +234,9 @@ function App() {
       socket.off("mute");
       socket.off("unmute");
       socket.off("volume-change");
+      socket.off("upload-start");
+      socket.off("upload-end");
+      socket.off("incoming-video-call");
     };
   }, [otherUserId]);
 
@@ -209,26 +257,44 @@ function App() {
 
   // Video silme işlemi
   const handleVideoDelete = async (filename) => {
-    try {
-      const response = await fetch(`${url}/videos/${filename}`, {
-        method: "DELETE",
-      });
+    Swal.fire({
+      title: "Emin misiniz?",
+      text: `${filename} adlı videoyu silmek istediğinize emin misiniz?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#d33",
+      cancelButtonColor: "#3085d6",
+      confirmButtonText: "Evet, Sil!",
+      cancelButtonText: "Hayır",
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          const response = await fetch(`${url}/videos/${filename}`, {
+            method: "DELETE",
+          });
 
-      if (response.ok) {
-        setAvailableVideos((prevVideos) =>
-          prevVideos.filter((video) => video !== filename)
-        );
-        if (uploadedVideo === `${url}/videos/${filename}`) {
-          setUploadedVideo(null); // Eğer silinen video oynatılıyorsa temizle
+          if (response.ok) {
+            setAvailableVideos((prevVideos) =>
+              prevVideos.filter((video) => video !== filename)
+            );
+            if (uploadedVideo === `${url}/videos/${filename}`) {
+              setUploadedVideo(null);
+            }
+            Swal.fire("Silindi!", "Video başarıyla silindi.", "success");
+          } else {
+            const errorData = await response.json();
+            Swal.fire(
+              "Hata!",
+              errorData.message || "Video silinirken bir hata oluştu.",
+              "error"
+            );
+          }
+        } catch (error) {
+          console.error("Video silme hatası:", error);
+          Swal.fire("Hata!", "Video silinirken bir hata oluştu.", "error");
         }
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Video silinirken bir hata oluştu.");
       }
-    } catch (error) {
-      console.error("Video silme hatası:", error);
-      alert("Video silinirken bir hata oluştu.");
-    }
+    });
   };
 
   // Video kontrol fonksiyonları
@@ -262,6 +328,10 @@ function App() {
     socket.emit("select-video", filename);
   };
 
+  const requestVideoCall = () => {
+    socket.emit("request-video-call");
+  };
+
   // Sidebar kontrolü
   const closeSidebar = () => {
     setShowSidebar(false);
@@ -289,25 +359,34 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 font-sans">
+      <LoadingBar color="#f11946" ref={socketLoadingBarRef} shadow={false} />
+      <LoadingBar color="#a0aec0" ref={loadingBarRef} shadow={false} />
       {!username ? (
         <UsernameInput onUsernameSubmit={handleUsernameSubmit} />
       ) : (
         <div className="min-h-screen flex">
           {showSidebar && (
-            <aside className="bg-gray-200 p-4 w-80 min-h-screen fixed top-0 left-0 shadow-md transform transition-transform duration-200 ease-in-out z-40">
+            <aside
+              className="bg-gray-200 p-4 w-80 min-h-screen fixed top-0 left-0 shadow-md transform transition-transform duration-300 ease-in-out z-40 rounded-br-xl"
+              style={{ borderTopRightRadius: "1.5rem" }}
+            >
               <button
                 onClick={closeSidebar}
                 className="absolute top-4 right-4 bg-gray-300 hover:bg-gray-400 p-2 rounded-md shadow-sm"
+                style={{ borderRadius: "1.5rem" }}
               >
                 <FontAwesomeIcon icon={faTimes} />
               </button>
               <div className="mt-10 mb-4">Kullanıcılar: {userCount} / 2</div>
-              <FileUpload onUploadSuccess={handleFileUploadSuccess} />
+              <FileUpload
+                onUploadSuccess={handleFileUploadSuccess}
+                disabled={isUploading}
+              />
               <VideoList
                 videos={availableVideos}
                 onSelect={handleSelectVideo}
-                onDelete={handleVideoDelete} // Silme fonksiyonu prop olarak gönderildi
+                onDelete={handleVideoDelete}
               />
             </aside>
           )}
@@ -337,19 +416,9 @@ function App() {
                   socket={socket}
                   isAudioCallEnabled={isAudioCallEnabled}
                   otherUserId={otherUserId}
+                  requestVideoCall={requestVideoCall}
                 />
               )}
-              {/* VideoCall bileşeni  artık playeriçinden çağrılıyor.*/}
-              {/* {showVideoCall && otherUserId && (
-                <VideoCall
-                  socket={socket}
-                  targetUserId={otherUserId}
-                  showVideoCall={showVideoCall}
-                  isAudioCallEnabled={isAudioCallEnabled}
-                  startWithAudio={true} // Ses varsayılan olarak açık
-                  startWithVideo={true} // Kamera varsayılan olarak açık
-                />
-              )} */}
             </div>
           </main>
         </div>

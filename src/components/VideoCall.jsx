@@ -162,7 +162,7 @@ function VideoCall({
   // WebRTC aramasını başlat
   const startCall = useCallback(async () => {
     if (!targetUserId) {
-      alert("Bağlanacak başka bir kullanıcı yok.");
+      Swal.fire("Uyarı!", "Bağlanacak başka bir kullanıcı yok.", "warning");
       return;
     }
 
@@ -251,7 +251,11 @@ function VideoCall({
       setIsCallActive(true);
     } catch (error) {
       console.error("Arama başlatılamadı:", error);
-      alert("Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin.");
+      Swal.fire(
+        "Hata!",
+        "Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin.",
+        "error"
+      );
     }
   }, [
     socket,
@@ -378,8 +382,10 @@ function VideoCall({
         setIsCallActive(true);
       } catch (error) {
         console.error("Teklif işlenirken hata:", error);
-        alert(
-          "Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin."
+        Swal.fire(
+          "Hata!",
+          "Kamera veya mikrofona erişimde sorun var. İzinleri kontrol edin.",
+          "error"
         );
       }
     };
@@ -451,8 +457,17 @@ function VideoCall({
       className="rounded-md overflow-hidden z-[9999]"
       style={{ position: "absolute", top: 0, left: 0 }}
     >
-      <div className="bg-gray-800 rounded-md h-full shadow-md">
-        <div className="bg-gray-700 border-b border-gray-600 flex justify-between items-center p-2 cursor-move text-white">
+      <div
+        className="bg-gray-800 rounded-md h-full shadow-md"
+        style={{ borderRadius: "1.5rem" }}
+      >
+        <div
+          className="bg-gray-700 border-b border-gray-600 flex justify-between items-center p-2 cursor-move text-white"
+          style={{
+            borderTopLeftRadius: "1.5rem",
+            borderTopRightRadius: "1.5rem",
+          }}
+        >
           <div className="flex items-center">
             <FontAwesomeIcon
               icon={faArrowsAlt}
@@ -463,25 +478,29 @@ function VideoCall({
           <div>
             <button
               onClick={increaseSize}
-              className="p-1 hover:bg-gray-600 rounded-full text-gray-300"
+              className="p-1 hover:bg-gray-600 rounded-full text-gray-300 focus:outline-none"
+              style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon icon={faPlus} />
             </button>
             <button
               onClick={decreaseSize}
-              className="p-1 hover:bg-gray-600 rounded-full text-gray-300"
+              className="p-1 hover:bg-gray-600 rounded-full text-gray-300 focus:outline-none"
+              style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon icon={faMinus} />
             </button>
             <button
               onClick={toggleExpand}
-              className="p-1 hover:bg-gray-600 rounded-full text-gray-300"
+              className="p-1 hover:bg-gray-600 rounded-full text-gray-300 focus:outline-none"
+              style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon icon={isExpanded ? faCompress : faExpand} />
             </button>
             <button
               onClick={onToggle}
-              className="p-1 hover:bg-gray-600 rounded-full text-gray-300"
+              className="p-1 hover:bg-gray-600 rounded-full text-gray-300 focus:outline-none"
+              style={{ borderRadius: "1.5rem" }}
             >
               {isHidden ? "Göster" : "Sakla"}
             </button>
@@ -490,17 +509,26 @@ function VideoCall({
 
         <div className="p-2 flex flex-col h-[calc(100%-42px)]">
           {/* Local Video */}
-          <div className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2">
+          <div
+            className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2"
+            style={{ borderRadius: "1.5rem" }}
+          >
             <video
               ref={localVideoRef}
               autoPlay
               muted
-              className="absolute top-0 left-0 w-full h-full object-cover"
-              style={{ display: isVideoEnabled ? "block" : "none" }}
+              className="absolute top-0 left-0 w-full h-full object-cover rounded-md"
+              style={{
+                display: isVideoEnabled ? "block" : "none",
+                borderRadius: "1.5rem",
+              }}
             />
             {/* Video kapalıyken gösterilecek ikon */}
             {!isVideoEnabled && (
-              <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800">
+              <div
+                className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 rounded-md"
+                style={{ borderRadius: "1.5rem" }}
+              >
                 <FontAwesomeIcon
                   icon={faVideoSlash}
                   className="text-white text-4xl"
@@ -510,12 +538,16 @@ function VideoCall({
           </div>
 
           {/* Remote Video */}
-          <div className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2">
+          <div
+            className="relative w-full h-1/2 bg-gray-900 rounded-md mb-2"
+            style={{ borderRadius: "1.5rem" }}
+          >
             <video
               ref={remoteVideoRef}
               autoPlay
-              className="absolute top-0 left-0 w-full h-full object-cover"
+              className="absolute top-0 left-0 w-full h-full object-cover rounded-md"
               muted={isRemoteAudioMuted} // local tarafta susturma
+              style={{ borderRadius: "1.5rem" }}
             />
           </div>
 
@@ -524,11 +556,12 @@ function VideoCall({
             {/* Mik.mute/unmute */}
             <button
               onClick={toggleAudio}
-              className={`p-2 rounded-full hover:bg-gray-600 ${
+              className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
                 isAudioEnabled
                   ? "bg-green-800 text-green-200"
                   : "bg-red-800 text-red-200"
               }`}
+              style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon
                 icon={isAudioEnabled ? faMicrophone : faMicrophoneSlash}
@@ -538,11 +571,12 @@ function VideoCall({
             {/* Video aç/kapa */}
             <button
               onClick={toggleVideo}
-              className={`p-2 rounded-full hover:bg-gray-600 ${
+              className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
                 isVideoEnabled
                   ? "bg-green-800 text-green-200"
                   : "bg-red-800 text-red-200"
               }`}
+              style={{ borderRadius: "1.5rem" }}
             >
               <FontAwesomeIcon icon={isVideoEnabled ? faVideo : faVideoSlash} />
             </button>
@@ -551,11 +585,12 @@ function VideoCall({
             {isAudioCallEnabled && (
               <button
                 onClick={isCallActive ? endCall : startCall}
-                className={`p-2 rounded-full hover:bg-gray-600 ${
+                className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
                   isCallActive
                     ? "bg-red-800 text-red-200"
                     : "bg-green-800 text-green-200"
                 }`}
+                style={{ borderRadius: "1.5rem" }}
               >
                 <FontAwesomeIcon icon={isCallActive ? faPhoneSlash : faPhone} />
               </button>
@@ -565,11 +600,12 @@ function VideoCall({
             {showVideoCall && targetUserId && (
               <button
                 onClick={toggleRemoteMute}
-                className={`p-2 rounded-full hover:bg-gray-600 ${
+                className={`p-2 rounded-full hover:bg-gray-600 focus:outline-none ${
                   isRemoteAudioMuted
                     ? "bg-yellow-800 text-yellow-200"
                     : "bg-blue-800 text-blue-200"
                 }`}
+                style={{ borderRadius: "1.5rem" }}
               >
                 <FontAwesomeIcon
                   icon={isRemoteAudioMuted ? faVolumeMute : faVolumeUp}
@@ -591,6 +627,7 @@ function VideoCall({
               value={micVolume}
               onChange={handleMicVolumeChange}
               className="bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              style={{ borderRadius: "1.5rem" }}
             />
 
             {/* Karşı Tarafın Sesi */}
@@ -602,6 +639,7 @@ function VideoCall({
               value={remoteVolume}
               onChange={handleRemoteVolumeChange}
               className="bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              style={{ borderRadius: "1.5rem" }}
             />
           </div>
         </div>
