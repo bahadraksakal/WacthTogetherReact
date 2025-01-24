@@ -69,6 +69,12 @@ function VideoCall({
   const audioContextRef = useRef(null);
   const gainNodeRef = useRef(null);
 
+  // **WebRTC Değişkenleri ve Ref'leri**
+  const peerConnectionRef = useRef(null);
+  const remoteStreamRef = useRef(new MediaStream()); // Uzak kullanıcının stream'i
+  const [remoteStreams, setRemoteStreams] = useState({}); // Birden fazla remote stream için state
+  const [iceServers, setIceServers] = useState([]); // STUN/TURN sunucu bilgileri
+
   const toggleAudio = useCallback(() => {
     const newAudioState = !hasLocalAudio;
     setHasLocalAudio(newAudioState);
@@ -162,41 +168,130 @@ function VideoCall({
     }
   }, []);
 
-  const toggleCall = useCallback(async () => {
-    setIsCallActive((prevState) => !prevState);
-    if (!isCallActive) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: hasLocalAudio,
-          video: hasLocalVideo,
-        });
-        localStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-      } catch (error) {
-        console.error("Görüşme başlatılamadı:", error);
-        Swal.fire(
-          "Hata",
-          `Görüşme başlatılırken hata oluştu: ${error.message}`,
-          "error"
-        );
-        setIsCallActive(false); // Hata durumunda butonu geri al
+  const startCall = useCallback(async () => {
+    setIsCallActive(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: hasLocalAudio,
+        video: hasLocalVideo,
+      });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
       }
-    } else {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => track.stop());
-        localStreamRef.current = null;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = null;
-        }
+
+      // **WebRTC Peer Connection Başlatma**
+      createPeerConnection();
+      stream
+        .getTracks()
+        .forEach((track) => peerConnectionRef.current.addTrack(track, stream));
+    } catch (error) {
+      console.error("Görüşme başlatılamadı:", error);
+      Swal.fire(
+        "Hata",
+        `Görüşme başlatılırken hata oluştu: ${error.message}`,
+        "error"
+      );
+      setIsCallActive(false);
+    }
+  }, [hasLocalAudio, hasLocalVideo]);
+
+  const endCall = useCallback(() => {
+    setIsCallActive(false);
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
       }
     }
-  }, [isCallActive, hasLocalAudio, hasLocalVideo]);
+    // Remote stream'i temizle
+    remoteStreamRef.current = new MediaStream();
+    setRemoteStreams({});
+  }, []);
+
+  const toggleCall = useCallback(() => {
+    isCallActive ? endCall() : startCall();
+  }, [isCallActive, startCall, endCall]);
+
+  // **WebRTC Peer Connection Oluşturma Fonksiyonu**
+  const createPeerConnection = useCallback(() => {
+    peerConnectionRef.current = new RTCPeerConnection({ iceServers });
+
+    peerConnectionRef.current.onicecandidate = handleICECandidateEvent;
+    peerConnectionRef.current.ontrack = handleTrackEvent;
+    peerConnectionRef.current.onnegotiationneeded =
+      handleNegotiationNeededEvent;
+    peerConnectionRef.current.onconnectionstatechange =
+      handleConnectionStateChange;
+  }, [iceServers]);
+
+  // **ICE Candidate Handler**
+  const handleICECandidateEvent = useCallback(
+    (event) => {
+      if (event.candidate) {
+        socket.emit("ice-candidate", {
+          candidate: event.candidate,
+          to: Object.keys(remoteStreams)[0], // İlk remote user'a gönderiyoruz, çoklu görüşme için düzenlenmeli
+        });
+      }
+    },
+    [socket, remoteStreams]
+  );
+
+  // **Track Handler**
+  const handleTrackEvent = useCallback((event) => {
+    console.log("Track event alındı:", event.streams[0]);
+    remoteStreamRef.current.addTrack(event.track);
+    setRemoteStreams((prevStreams) => ({
+      ...prevStreams,
+      [Object.keys(prevStreams)[0] || "remoteUser"]: remoteStreamRef.current, // İlk remote user için 'remoteUser' key'i, çoklu görüşme için düzenlenmeli
+    }));
+  }, []);
+
+  // **Negotiation Needed Handler**
+  const handleNegotiationNeededEvent = useCallback(async () => {
+    try {
+      const offer = await peerConnectionRef.current.createOffer();
+      await peerConnectionRef.current.setLocalDescription(offer);
+      socket.emit("call-user", {
+        signal: offer,
+        to: Object.keys(remoteStreams)[0], // İlk remote user'a gönderiyoruz, çoklu görüşme için düzenlenmeli
+        from: socket.id,
+      });
+    } catch (error) {
+      console.error("Negotiation needed hatası:", error);
+    }
+  }, [socket, remoteStreams]);
+
+  // **Connection State Change Handler**
+  const handleConnectionStateChange = useCallback(
+    (event) => {
+      switch (peerConnectionRef.current.connectionState) {
+        case "connected":
+          console.log("WebRTC bağlantısı başarılı!");
+          break;
+        case "disconnected":
+        case "failed":
+          console.log("WebRTC bağlantısı kesildi veya başarısız oldu.");
+          endCall(); // Bağlantı kesilirse görüşmeyi sonlandır
+          break;
+        case "closed":
+          console.log("WebRTC bağlantısı kapatıldı.");
+          break;
+      }
+    },
+    [endCall]
+  );
 
   useEffect(() => {
     socket.on("user-joined", (user) => {
       console.log(`Yeni kullanıcı katıldı: ${user.username} (ID: ${user.id})`);
+      // Yeni kullanıcı katıldığında WebRTC bağlantısı kurmayı başlatabiliriz (isteğe bağlı)
     });
 
     socket.on("user-left", (socketId) => {
@@ -207,6 +302,11 @@ function VideoCall({
         return newState;
       });
       delete remoteVideosRef.current[socketId];
+      if (Object.keys(remoteStreams).includes(socketId)) {
+        const newRemoteStreams = { ...remoteStreams };
+        delete newRemoteStreams[socketId];
+        setRemoteStreams(newRemoteStreams);
+      }
     });
 
     socket.on("remote-media-toggled", ({ socketId, audio, video }) => {
@@ -219,12 +319,70 @@ function VideoCall({
       }));
     });
 
+    // **Yeni: ICE Servers Alındığında**
+    socket.on("ice-servers", (servers) => {
+      setIceServers(servers);
+    });
+
+    // **Yeni: Gelen Arama**
+    socket.on("incoming-call", async (payload) => {
+      console.log("Gelen arama:", payload);
+      const callerSocketId = payload.from;
+      const offer = payload.signal;
+
+      if (!peerConnectionRef.current) {
+        createPeerConnection(); // Peer connection yoksa oluştur
+      }
+
+      try {
+        await peerConnectionRef.current.setRemoteDescription(
+          new RTCSessionDescription(offer)
+        );
+        const answer = await peerConnectionRef.current.createAnswer();
+        await peerConnectionRef.current.setLocalDescription(answer);
+
+        socket.emit("answer-call", { signal: answer, to: callerSocketId });
+      } catch (error) {
+        console.error("Arama cevaplama hatası:", error);
+      }
+      setIsCallActive(true); // Arama aktif olarak ayarla
+    });
+
+    // **Yeni: Arama Cevaplandığında**
+    socket.on("call-accepted", async (signal) => {
+      console.log("Arama kabul edildi:", signal);
+      try {
+        await peerConnectionRef.current.setRemoteDescription(
+          new RTCSessionDescription(signal)
+        );
+        startCall(); // Aramayı başlat (medya stream'lerini aç)
+        setIsCallActive(true); // Arama aktif olarak ayarla
+      } catch (error) {
+        console.error("Arama kabul edildiğinde hata:", error);
+      }
+    });
+
+    // **Yeni: ICE Candidate Alındığında**
+    socket.on("ice-candidate", async (candidate) => {
+      try {
+        await peerConnectionRef.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
+      } catch (error) {
+        console.error("ICE candidate ekleme hatası:", error);
+      }
+    });
+
     return () => {
       socket.off("user-joined");
       socket.off("user-left");
       socket.off("remote-media-toggled");
+      socket.off("ice-servers");
+      socket.off("incoming-call");
+      socket.off("call-accepted");
+      socket.off("ice-candidate");
     };
-  }, [socket]);
+  }, [socket, createPeerConnection, startCall, remoteStreams]);
 
   useEffect(() => {
     // Bağlantı kurulduğunda kendi medya durumunu gönder
@@ -331,6 +489,27 @@ function VideoCall({
                       />
                     </div>
                   )}
+                </div>
+              ))}
+              {/* **Yeni: Remote Streams Video Elementleri** */}
+              {Object.entries(remoteStreams).map(([socketId, stream]) => (
+                <div
+                  key={socketId}
+                  className="relative w-full h-1/2 bg-gray-900 object-cover rounded-md mb-2"
+                  style={{
+                    borderRadius: "1.5rem",
+                    width: `${remoteVideoWidth * 2}px`,
+                    height: `${remoteVideoHeight * 2}px`,
+                  }}
+                >
+                  <video
+                    ref={(el) => (remoteVideosRef.current[socketId] = el)}
+                    autoPlay
+                    muted={isRemoteAudioMuted[socketId]}
+                    className="relative top-0 left-0 w-full h-full object-cover rounded-md"
+                    style={{ borderRadius: "1.5rem" }}
+                    srcObject={stream} // **Remote stream'i video kaynağı olarak ayarla**
+                  />
                 </div>
               ))}
             </div>

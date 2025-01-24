@@ -1,4 +1,3 @@
-// FrontEnd kaynak Kodları:
 // Front/src/App.js
 import React, { useState, useRef, useEffect } from "react";
 import io from "socket.io-client";
@@ -206,23 +205,24 @@ function App() {
       loadingBarRef.current.complete();
     });
 
-    socket.on("incoming-video-call", (callerId) => {
-      Swal.fire({
-        title: "Görüntülü Arama İsteği",
-        text: "Bir kullanıcı görüntülü arama yapmak istiyor. Kabul ediyor musunuz?",
-        icon: "question",
-        showCancelButton: true,
-        confirmButtonColor: "#3085d6",
-        cancelButtonColor: "#d33",
-        confirmButtonText: "Evet, Kabul Et!",
-        cancelButtonText: "Hayır",
-      }).then((result) => {
-        if (result.isConfirmed) {
-          setOtherUserId(callerId);
-          setShowVideoCall(true);
-        }
-      });
-    });
+    // **Silindi: incoming-video-call olayı kaldırıldı, yerine "incoming-call" kullanılıyor**
+    // socket.on("incoming-video-call", (callerId) => {
+    //   Swal.fire({
+    //     title: "Görüntülü Arama İsteği",
+    //     text: "Bir kullanıcı görüntülü arama yapmak istiyor. Kabul ediyor musunuz?",
+    //     icon: "question",
+    //     showCancelButton: true,
+    //     confirmButtonColor: "#3085d6",
+    //     cancelButtonColor: "#d33",
+    //     confirmButtonText: "Evet, Kabul Et!",
+    //     cancelButtonText: "Hayır",
+    //   }).then((result) => {
+    //     if (result.isConfirmed) {
+    //       setOtherUserId(callerId);
+    //       setShowVideoCall(true);
+    //     }
+    //   });
+    // });
 
     return () => {
       socket.off("connect");
@@ -243,7 +243,8 @@ function App() {
       socket.off("volume-change");
       socket.off("upload-start");
       socket.off("upload-end");
-      socket.off("incoming-video-call");
+      // **Silindi: incoming-video-call olayı kaldırıldı**
+      // socket.off("incoming-video-call");
     };
   }, [otherUserId]);
 
@@ -336,9 +337,19 @@ function App() {
     socket.emit("select-video", filename);
   };
 
-  const requestVideoCall = () => {
-    socket.emit("request-video-call");
-  };
+  // **Yeni: Arama isteği gönderme fonksiyonu**
+  const requestVideoCall = useCallback(() => {
+    if (otherUserId) {
+      socket.emit("call-user", { to: otherUserId, from: socket.id });
+      setShowVideoCall(true); // Arama paneli aç
+    } else {
+      Swal.fire(
+        "Uyarı",
+        "Görüntülü arama yapmak için başka bir kullanıcının bağlanmasını bekleyin.",
+        "warning"
+      );
+    }
+  }, [otherUserId, socket]);
 
   // Sidebar kontrolü
   const closeSidebar = () => {
@@ -426,7 +437,19 @@ function App() {
                   socket={socket}
                   isAudioCallEnabled={isAudioCallEnabled}
                   otherUserId={otherUserId}
-                  requestVideoCall={requestVideoCall}
+                  requestVideoCall={requestVideoCall} // **requestVideoCall fonksiyonunu prop olarak geçir**
+                />
+              )}
+              {/* **VideoCall bileşenini App.js içinde render edin** */}
+              {showVideoCall && otherUserId && (
+                <VideoCall
+                  socket={socket}
+                  isHidden={!showVideoCall}
+                  onToggle={toggleVideoCall}
+                  showVideoCall={showVideoCall}
+                  isAudioCallEnabled={isAudioCallEnabled}
+                  startWithAudio={true}
+                  startWithVideo={true}
                 />
               )}
             </div>
