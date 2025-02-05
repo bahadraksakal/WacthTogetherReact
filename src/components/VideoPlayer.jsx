@@ -24,7 +24,7 @@ library.add(
   faCompress,
   faFolderOpen,
   faVideoIcon,
-  faPhoneIcon
+  faPhoneIcon,
 );
 
 // Yardımcı fonksiyon: zaman formatlama
@@ -61,19 +61,25 @@ function VideoPlayer({
   const controlsTimeout = useRef(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [lastUpdate, setLastUpdate] = useState(0);
+  const [localIsPlaying, setLocalIsPlaying] = useState(isPlaying);
+
+  // Prop değiştiğinde state'i güncelle
+  useEffect(() => {
+    setLocalIsPlaying(isPlaying);
+  }, [isPlaying]);
 
   // Play/Pause butonuna basıldığında
   const handlePlayPause = useCallback(() => {
-    isPlaying ? onPause() : onPlay();
-  }, [isPlaying, onPause, onPlay]);
+    localIsPlaying ? onPause() : onPlay();
+  }, [localIsPlaying, onPause, onPlay]);
 
   // Video zaman güncellemesi
   const handleTimeUpdate = useCallback(() => {
     if (videoRef.current) {
       const currentTime = videoRef.current.currentTime;
       setCurrentTime(currentTime);
-      // Sadece 1 saniyede bir güncelle
-      if (Date.now() - lastUpdate > 1000) {
+      // Direkt zamanı ilet (2 saniyede bir throttle)
+      if (Date.now() - lastUpdate > 2000) {
         socket.volatile.emit("time-update", currentTime);
         setLastUpdate(Date.now());
       }
@@ -90,7 +96,7 @@ function VideoPlayer({
     (event) => {
       onSeek(parseFloat(event.target.value));
     },
-    [onSeek]
+    [onSeek],
   );
 
   // Ses seviyesi değişikliği (0 - 1 arası)
@@ -98,7 +104,7 @@ function VideoPlayer({
     (event) => {
       onVolumeChange(parseFloat(event.target.value));
     },
-    [onVolumeChange]
+    [onVolumeChange],
   );
 
   // Fullscreen aç/kapa
@@ -111,112 +117,113 @@ function VideoPlayer({
       document.exitFullscreen();
       setIsFullScreen(false);
     }
-  }, [videoRef]);
-
-  // Kontrolleri gizle/göster
-  const resetControlsTimeout = useCallback(() => {
-    clearTimeout(controlsTimeout.current);
-    setShowControls(true);
-    controlsTimeout.current = setTimeout(() => {
-      setShowControls(false);
-    }, 3000);
+    setShowControls(true); // Fullscreen geçişte kontrolleri göster
   }, []);
 
+  // Kontrolleri gizleme fonksiyonu
+  const hideControls = useCallback(() => {
+    setShowControls(false);
+  }, []);
+
+  // Fare hareket ettiğinde kontrolleri göster ve zamanlayıcıyı sıfırla
   const handleMouseMove = useCallback(() => {
-    resetControlsTimeout();
-  }, [resetControlsTimeout]);
+    setShowControls(true);
+    clearTimeout(controlsTimeout.current);
+    controlsTimeout.current = setTimeout(hideControls, 3000); // 3 saniye sonra gizle
+  }, [hideControls]);
 
-  useEffect(() => {
-    const handleFullScreenChange = () => {
-      setIsFullScreen(!!document.fullscreenElement);
-      if (document.fullscreenElement) {
-        resetControlsTimeout();
-      } else {
-        clearTimeout(controlsTimeout.current);
-        setShowControls(true);
-      }
-    };
+  // Kontrol çubuğu üzerinde fare hareket ettiğinde zamanlayıcıyı temizle
+  const handleControlMouseOver = useCallback(() => {
+    clearTimeout(controlsTimeout.current);
+    setShowControls(true); // Kontrol çubuğundayken kontrolleri açık tut
+  }, []);
 
-    document.addEventListener("fullscreenchange", handleFullScreenChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullScreenChange);
-      clearTimeout(controlsTimeout.current);
-    };
-  }, [resetControlsTimeout]);
+  // Kontrol çubuğu dışına fare çıktığında zamanlayıcıyı yeniden başlat
+  const handleControlMouseOut = useCallback(() => {
+    controlsTimeout.current = setTimeout(hideControls, 3000); // 3 saniye sonra gizle
+  }, [hideControls]);
 
-  // Ekran fullscreen olduğunda fare hareketini takip et
-  useEffect(() => {
-    if (isFullScreen) {
-      document.addEventListener("mousemove", handleMouseMove);
-    } else {
-      document.removeEventListener("mousemove", handleMouseMove);
-      clearTimeout(controlsTimeout.current);
-      setShowControls(true);
+  // Video üzerine tıklandığında oynat/duraklat ve kontrolleri göster/gizle
+  const handleVideoClick = useCallback(() => {
+    handlePlayPause();
+    setShowControls(!showControls); // Kontrollerin görünürlüğünü değiştir
+    if (!showControls) {
+      clearTimeout(controlsTimeout.current); // Eğer kontroller gösteriliyorsa, zamanlayıcıyı temizle
+      controlsTimeout.current = setTimeout(hideControls, 3000); // ve 3 saniye sonra tekrar gizle
     }
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-    };
-  }, [isFullScreen, handleMouseMove]);
+  }, [handlePlayPause, showControls, hideControls]);
 
-  // Gelişmiş senkronizasyon için useEffect
+  // Video yüklendiğinde süreyi güncelle
+  const handleLoadedMetadata = useCallback(() => {
+    setCurrentTime(0); // Video başladığında süreyi sıfırla
+  }, []);
+
+  // Video state dinleyicisi (senkronizasyon için)
   useEffect(() => {
     const handleVideoState = (state) => {
-      if (videoRef.current) {
+      if (videoRef.current && state.lastUpdatedBy !== socket.id) {
+        // 1 saniyeden fazla fark varsa senkronize et
         if (Math.abs(videoRef.current.currentTime - state.currentTime) > 1) {
           videoRef.current.currentTime = state.currentTime;
         }
-        if (state.isPlaying !== isPlaying) {
+
+        // Oynatma durumunu senkronize et
+        if (state.isPlaying !== localIsPlaying) {
           state.isPlaying ? videoRef.current.play() : videoRef.current.pause();
+          setLocalIsPlaying(state.isPlaying);
         }
+
+        // Ses ayarlarını senkronize et
         videoRef.current.volume = state.volume;
         videoRef.current.muted = state.muted;
       }
     };
 
-    socket.on("video-state", handleVideoState);
-    return () => socket.off("video-state", handleVideoState);
-  }, [socket, isPlaying]);
+    if (socket) socket.on("video-state", handleVideoState);
+
+    return () => {
+      if (socket) socket.off("video-state", handleVideoState);
+    };
+  }, [socket, localIsPlaying]);
 
   return (
     <div
-      className="bg-gray-800 rounded-md shadow-lg overflow-hidden relative h-[calc(100vh-6vh)]"
-      onMouseMove={handleMouseMove}
-      id="video-call-comp"
-      style={{ borderRadius: "1.5rem" }}
+      className="relative flex-grow bg-black flex flex-col justify-center items-center mx-2"
+      onMouseMove={showControls ? handleMouseMove : undefined}
     >
-      {videoUrl && (
-        <video
-          ref={videoRef}
-          src={videoUrl}
-          className="w-full h-full bg-black cursor-pointer object-contain"
-          onTimeUpdate={handleTimeUpdate}
-          onClick={handlePlayPause}
-          style={{
-            objectFit: "contain",
-          }}
-        />
-      )}
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        className="w-full h-full object-contain"
+        onClick={handleVideoClick}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        muted={muted}
+        volume={volume}
+        controls={false}
+      />
 
-      {/* Kontrol Çubuğu */}
+      {/* Geliştirilmiş Kontrol Çubuğu */}
       <div
-        className={`p-4 flex items-center absolute bottom-0 left-0 w-full bg-gray-800 bg-opacity-75 transition-opacity duration-300 ${
+        className={`absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 transition-opacity duration-300 ${
           showControls ? "opacity-100" : "opacity-0"
-        }`}
-        style={{
-          borderBottomLeftRadius: "1.5rem",
-          borderBottomRightRadius: "1.5rem",
-        }}
+        } flex p-3 justify-between items-center`}
+        onMouseOver={handleControlMouseOver}
+        onMouseOut={handleControlMouseOut}
       >
-        <div className="flex items-center space-x-4 flex-grow">
-          {/* Play/Pause */}
+        <div className="flex items-center space-x-3">
+          {/* Play/Pause Butonu - daha büyük ikonlar ve beyaz renk */}
           <button
             onClick={handlePlayPause}
             className="text-white hover:text-gray-300 focus:outline-none"
           >
-            <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} size="lg" />
+            <FontAwesomeIcon
+              icon={localIsPlaying ? faPause : faPlay}
+              size="lg"
+            />
           </button>
 
-          {/* Mute/Unmute */}
+          {/* Ses Kontrol Butonu - beyaz renk */}
           <button
             onClick={handleMuteUnmute}
             className="text-white hover:text-gray-300 focus:outline-none"
@@ -227,7 +234,7 @@ function VideoPlayer({
             />
           </button>
 
-          {/* Volume Slider (0 - 1 arası) */}
+          {/* Ses Slider - daha belirgin stil */}
           <input
             type="range"
             min="0"
@@ -235,14 +242,15 @@ function VideoPlayer({
             step="0.01"
             value={volume}
             onChange={handleVolumeChangeLocal}
-            className="w-16"
-            style={{ borderRadius: "1.5rem" }}
+            className="w-24 h-1 bg-gray-600 rounded-full appearance-none cursor-pointer accent-white"
           />
 
-          {/* Current Time */}
+          {/* Mevcut Zaman - beyaz renk */}
           <span className="text-white text-sm">{formatTime(currentTime)}</span>
+        </div>
 
-          {/* Seek Slider */}
+        <div className="flex items-center space-x-3">
+          {/* Seek Slider - daha belirgin stil */}
           <input
             type="range"
             min="0"
@@ -250,16 +258,15 @@ function VideoPlayer({
             step="0.1"
             value={currentTime}
             onChange={handleSeekChange}
-            className="flex-grow"
-            style={{ borderRadius: "1.5rem" }}
+            className="flex-grow h-1 bg-gray-600 rounded-full appearance-none cursor-pointer accent-white"
           />
 
-          {/* Duration */}
+          {/* Toplam Süre - beyaz renk */}
           <span className="text-white text-sm">
             / {formatTime(videoRef.current?.duration || 0)}
           </span>
 
-          {/* Fullscreen */}
+          {/* Fullscreen Butonu - beyaz renk */}
           <button
             onClick={toggleFullScreen}
             className="text-white hover:text-gray-300 focus:outline-none"
@@ -305,14 +312,14 @@ function VideoPlayer({
       </button> */}
 
       {/* VideoCall bileşeni */}
-      {showVideoCall && otherUserId && (
+      {showVideoCall && (
         <VideoCall
           socket={socket}
           targetUserId={otherUserId}
           showVideoCall={showVideoCall}
           isAudioCallEnabled={isAudioCallEnabled}
-          startWithAudio={true} // Ses varsayılan olarak açık
-          startWithVideo={true} // Kamera varsayılan olarak açık
+          startWithAudio={true}
+          startWithVideo={true}
         />
       )}
     </div>

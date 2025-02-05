@@ -32,7 +32,7 @@ library.add(
   faPhone,
   faPhoneSlash,
   faVolumeUp,
-  faVolumeMute
+  faVolumeMute,
 );
 
 const initialWidth = 320;
@@ -150,10 +150,10 @@ function VideoCall({
       console.log(
         `Uzak kullanıcı ${socketId} için ses ${
           !isRemoteAudioMuted[socketId] ? "susturuldu" : "açıldı"
-        }`
+        }`,
       );
     },
-    [isRemoteAudioMuted]
+    [isRemoteAudioMuted],
   );
 
   const handleMicVolumeChange = useCallback((e) => {
@@ -166,7 +166,7 @@ function VideoCall({
       const audioContext = audioContextRef.current || new AudioContext();
       audioContextRef.current = audioContext;
       const source = audioContext.createMediaStreamSource(
-        localStreamRef.current
+        localStreamRef.current,
       );
       const gainNode = gainNodeRef.current || audioContext.createGain();
       gainNodeRef.current = gainNode;
@@ -206,7 +206,7 @@ function VideoCall({
       Swal.fire(
         "Hata",
         `Görüşme başlatılırken hata oluştu: ${error.message}`,
-        "error"
+        "error",
       );
       setIsCallActive(false);
     }
@@ -249,7 +249,7 @@ function VideoCall({
         });
       }
     },
-    [socket, otherUserId]
+    [socket, otherUserId],
   );
 
   const handleTrackEvent = useCallback(
@@ -263,7 +263,7 @@ function VideoCall({
       });
       setRemoteStreams({ ...remoteStreams });
     },
-    [remoteStreams]
+    [remoteStreams],
   );
 
   const handleNegotiationNeededEvent = useCallback(async () => {
@@ -351,7 +351,7 @@ function VideoCall({
 
     socket.on("remote-media-toggled", ({ socketId, audio, video }) => {
       console.log(
-        `Uzak kullanıcı medya değiştirdi - ID: ${socketId}, Ses: ${audio}, Video: ${video}`
+        `Uzak kullanıcı medya değiştirdi - ID: ${socketId}, Ses: ${audio}, Video: ${video}`,
       );
       setRemoteUsersMedia((prev) => ({
         ...prev,
@@ -391,7 +391,7 @@ function VideoCall({
       try {
         if (peerConnectionRef.current) {
           await peerConnectionRef.current.setRemoteDescription(
-            new RTCSessionDescription(signal)
+            new RTCSessionDescription(signal),
           );
           const answer = await peerConnectionRef.current.createAnswer();
           await peerConnectionRef.current.setLocalDescription(answer);
@@ -410,7 +410,7 @@ function VideoCall({
       try {
         if (peerConnectionRef.current) {
           await peerConnectionRef.current.addIceCandidate(
-            new RTCIceCandidate(candidate)
+            new RTCIceCandidate(candidate),
           );
         }
       } catch (error) {
@@ -418,11 +418,12 @@ function VideoCall({
       }
     });
 
-    socket.on("end-call", ({ to }) => {
-      if (activeCalls[to]) {
-        io.to(activeCalls[to]).emit("call-ended");
-        io.to(to).emit("call-ended");
-        delete activeCalls[to];
+    socket.on("end-call", () => {
+      // Aktif çağrı bilgisi istemci tarafında tutulmadığından doğrudan çağrıyı sonlandırıyoruz.
+      setIsCallActive(false);
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
       }
     });
 
@@ -502,6 +503,15 @@ function VideoCall({
       localVideoRef.current.muted = true;
     }
   }, [hasLocalAudio]);
+
+  useEffect(() => {
+    Object.entries(remoteStreams).forEach(([socketId, stream]) => {
+      const videoElem = remoteVideosRef.current[socketId];
+      if (videoElem && videoElem.srcObject !== stream) {
+        videoElem.srcObject = stream;
+      }
+    });
+  }, [remoteStreams]);
 
   return (
     <Rnd
@@ -622,7 +632,6 @@ function VideoCall({
                     muted={isRemoteAudioMuted[socketId]}
                     className="relative top-0 left-0 w-full h-full object-cover rounded-md"
                     style={{ borderRadius: "1.5rem" }}
-                    srcObject={stream} // **Remote stream'i video kaynağı olarak ayarla**
                   />
                 </div>
               ))}
@@ -743,7 +752,7 @@ function VideoCall({
                   onChange={(e) =>
                     handleRemoteVolumeChange(
                       socketId,
-                      parseInt(e.target.value, 10)
+                      parseInt(e.target.value, 10),
                     )
                   }
                   className="bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
