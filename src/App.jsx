@@ -16,7 +16,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { library } from "@fortawesome/fontawesome-svg-core";
 import "./index.css";
-import { url } from "./utils";
+import { url, socketOptions } from "./utils";
 import Swal from "sweetalert2";
 import LoadingBar from "react-top-loading-bar";
 
@@ -24,7 +24,7 @@ library.add(faVideo, faFilm, faUsers, faSignOutAlt, faFileUpload);
 
 function App() {
   const [username, setUsername] = useState(
-    localStorage.getItem("username") || "",
+    localStorage.getItem("username") || ""
   );
   const [uploadedVideo, setUploadedVideo] = useState(null);
   const [availableVideos, setAvailableVideos] = useState([]);
@@ -46,143 +46,205 @@ function App() {
   const socketRef = useRef(null);
   const socketLoadingBarRef = useRef(null);
   const loadingBarRef = useRef(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState(navigator.onLine);
+  const maxReconnectAttempts = 5;
 
   const socket = useRef(null);
 
   useEffect(() => {
-    socket.current = io(url, {
-      transports: ["websocket"],
-      autoConnect: true,
-      secure: true,
-      reconnectionAttempts: 3,
-      timeout: 5000,
-    });
-    socketRef.current = socket.current;
+    if (!socketLoadingBarRef.current || !loadingBarRef.current) {
+      return;
+    }
 
-    socket.current.on("connect", () => {
-      setSocketStatus("connected");
-      socketLoadingBarRef.current.continuousStart();
-      console.log("Sunucuya bağlandı");
-      socketLoadingBarRef.current.complete();
-      setIsLoading(false);
-    });
+    try {
+      socket.current = io(url, socketOptions);
+      socketRef.current = socket.current;
 
-    socket.current.on("video-state", (state) => {
-      if (state.lastUpdatedBy === socket.current.id) return;
-      setIsPlaying(state.isPlaying);
-      if (videoRef.current) {
-        if (state.isPlaying) {
-          if (videoRef.current.paused) {
-            videoRef.current
-              .play()
-              .catch((e) => console.error("Oynatma hatası:", e));
+      socket.current.on("connect", () => {
+        setSocketStatus("connected");
+        if (socketLoadingBarRef.current) {
+          socketLoadingBarRef.current.continuousStart();
+          console.log("Sunucuya bağlandı");
+          socketLoadingBarRef.current.complete();
+        }
+        setIsLoading(false);
+      });
+
+      socket.current.on("video-state", (state) => {
+        if (state.lastUpdatedBy === socket.current.id) return;
+        setIsPlaying(state.isPlaying);
+        if (videoRef.current) {
+          if (state.isPlaying) {
+            if (videoRef.current.paused) {
+              videoRef.current
+                .play()
+                .catch((e) => console.error("Oynatma hatası:", e));
+            }
+          } else {
+            if (!videoRef.current.paused) videoRef.current.pause();
           }
-        } else {
-          if (!videoRef.current.paused) videoRef.current.pause();
+          videoRef.current.currentTime = state.currentTime;
         }
-        videoRef.current.currentTime = state.currentTime;
-      }
-      setVolume(state.volume);
-    });
-
-    socket.current.on("existing-users", (users) => {
-      setUserCount(users.length);
-      if (users.length > 0) {
-        const firstUser = users.find((user) => user.id !== socket.current.id);
-        if (firstUser) {
-          setOtherUserId(firstUser.id);
-        }
-      }
-    });
-
-    socket.current.on("user-joined", (data) => {
-      Swal.fire({
-        title: `${data.username} katıldı!`,
-        icon: "info",
-        timer: 2000,
+        setVolume(state.volume);
       });
-    });
 
-    socket.current.on("user-updated", (updatedUsers) => {
-      setUserCount(updatedUsers.length);
-      setUsers(updatedUsers);
-      setOtherUserId(
-        updatedUsers.find((u) => u.id !== socket.current.id)?.id || null,
+      socket.current.on("existing-users", (users) => {
+        setUserCount(users.length);
+        if (users.length > 0) {
+          const firstUser = users.find((user) => user.id !== socket.current.id);
+          if (firstUser) {
+            setOtherUserId(firstUser.id);
+          }
+        }
+      });
+
+      socket.current.on("user-joined", (data) => {
+        Swal.fire({
+          title: `${data.username} katıldı!`,
+          icon: "info",
+          timer: 2000,
+        });
+      });
+
+      socket.current.on("user-updated", (updatedUsers) => {
+        setUserCount(updatedUsers.length);
+        setUsers(updatedUsers);
+        setOtherUserId(
+          updatedUsers.find((u) => u.id !== socket.current.id)?.id || null
+        );
+      });
+
+      socket.current.on("disconnect", () => {
+        setSocketStatus("disconnected");
+        console.log("Sunucudan ayrıldı");
+        Swal.fire({
+          title: "Bağlantı Kesildi",
+          text: "Sunucu bağlantısı kesildi. Yeniden bağlanılıyor...",
+          icon: "warning",
+          timer: 3000,
+        });
+      });
+
+      socket.current.on("server-full", () =>
+        Swal.fire(
+          "Sunucu Dolu!",
+          "Şu anda sunucu dolu. Lütfen daha sonra tekrar deneyin.",
+          "warning"
+        )
       );
-    });
 
-    socket.current.on("disconnect", () => {
-      setSocketStatus("disconnected");
-      console.log("Sunucudan ayrıldı");
-      Swal.fire({
-        title: "Bağlantı Kesildi",
-        text: "Sunucu bağlantısı kesildi. Yeniden bağlanılıyor...",
-        icon: "warning",
-        timer: 3000,
+      socket.current.on("available-videos", (videos) => {
+        setAvailableVideos(videos);
+        setVideoListLoading(false);
       });
-    });
 
-    socket.current.on("connect_error", (err) => {
-      setError("Sunucu bağlantı hatası: " + err.message);
-      setSocketStatus("error");
-      console.error("Bağlantı hatası:", err);
-      Swal.fire({
-        title: "Bağlantı Hatası!",
-        text: "Sunucuya bağlanılamadı. Tekrar deneniyor...",
-        icon: "error",
-        timer: 3000,
+      socket.current.on("video-selected", (filename) => {
+        console.log("Video seçildi:", filename);
+        setUploadedVideo(`${url}/videos/${filename}`);
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current
+            .play()
+            .catch((e) => console.error("Oynatma hatası:", e));
+        }
+        setIsPlaying(true);
       });
-    });
 
-    socket.current.on("server-full", () =>
-      Swal.fire(
-        "Sunucu Dolu!",
-        "Şu anda sunucu dolu. Lütfen daha sonra tekrar deneyin.",
-        "warning",
-      ),
-    );
+      socket.current.on("mute", () => {
+        setMuted(true);
+      });
 
-    socket.current.on("available-videos", (videos) => {
-      setAvailableVideos(videos);
-      setVideoListLoading(false);
-    });
+      socket.current.on("unmute", () => {
+        setMuted(false);
+      });
 
-    socket.current.on("video-selected", (filename) => {
-      console.log("Video seçildi:", filename);
-      setUploadedVideo(`${url}/videos/${filename}`);
-      if (videoRef.current) {
-        videoRef.current.load();
-        videoRef.current
-          .play()
-          .catch((e) => console.error("Oynatma hatası:", e));
-      }
-      setIsPlaying(true);
-    });
+      socket.current.on("volume-change", (volume) => {
+        setVolume(volume);
+      });
 
-    socket.current.on("mute", () => {
-      setMuted(true);
-    });
+      socket.current.emit("get-videos");
 
-    socket.current.on("unmute", () => {
-      setMuted(false);
-    });
-
-    socket.current.on("volume-change", (volume) => {
-      setVolume(volume);
-    });
-
-    socket.current.emit("get-videos");
-
-    return () => {
-      setSocketStatus("disconnected");
-      console.log("Uygulama kapanıyor, soket bağlantısı kesiliyor.");
-      socket.current.disconnect();
-    };
-  }, []);
+      return () => {
+        setSocketStatus("disconnected");
+        console.log("Uygulama kapanıyor, soket bağlantısı kesiliyor.");
+        socket.current.disconnect();
+      };
+    } catch (error) {
+      console.error("Socket bağlantı hatası:", error);
+      setError("Socket bağlantısı kurulamadı: " + error.message);
+    }
+  }, [socketLoadingBarRef.current, loadingBarRef.current]);
 
   useEffect(() => {
     localStorage.setItem("username", username);
   }, [username]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setNetworkStatus(true);
+      if (socket.current?.disconnected) {
+        handleReconnect();
+      }
+    };
+
+    const handleOffline = () => {
+      setNetworkStatus(false);
+      setError("İnternet bağlantısı kesildi");
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      setError("Maksimum yeniden bağlanma denemesi aşıldı");
+      return;
+    }
+
+    setIsReconnecting(true);
+    setReconnectAttempts((prev) => prev + 1);
+
+    try {
+      if (socket.current) {
+        socket.current.disconnect();
+      }
+
+      socket.current = io(url, {
+        ...socketOptions,
+        reconnection: true,
+        reconnectionAttempts: maxReconnectAttempts - reconnectAttempts,
+      });
+
+      socket.current.on("connect", () => {
+        setIsReconnecting(false);
+        setReconnectAttempts(0);
+        setError(null);
+        if (username) {
+          socket.current.emit("user-join", username);
+        }
+      });
+
+      socket.current.on("connect_error", (error) => {
+        console.error("Yeniden bağlanma hatası:", error);
+        setIsReconnecting(false);
+        if (reconnectAttempts < maxReconnectAttempts) {
+          setTimeout(() => handleReconnect(), 2000);
+        }
+      });
+    } catch (error) {
+      console.error("Yeniden bağlanma hatası:", error);
+      setIsReconnecting(false);
+      setError("Yeniden bağlanma hatası: " + error.message);
+    }
+  }, [reconnectAttempts, username, maxReconnectAttempts]);
 
   const handleUsernameSubmit = useCallback((name) => {
     setUsername(name);
@@ -198,7 +260,7 @@ function App() {
         videoRef.current.currentTime = 0;
       }
     },
-    [socket.current, url],
+    [socket.current, url]
   );
 
   const handleSelectVideo = useCallback(
@@ -210,7 +272,7 @@ function App() {
         videoRef.current.currentTime = 0;
       }
     },
-    [socket.current],
+    [socket.current]
   );
 
   const handleVideoDelete = useCallback(
@@ -218,7 +280,7 @@ function App() {
       setAvailableVideos((prev) => prev.filter((v) => v !== filename));
       if (uploadedVideo === `${url}/videos/${filename}`) setUploadedVideo(null);
     },
-    [uploadedVideo],
+    [uploadedVideo]
   );
 
   const handlePlay = useCallback(() => {
@@ -269,7 +331,7 @@ function App() {
       Swal.fire(
         "Uyarı",
         "Görüntülü arama yapmak için başka bir kullanıcının bağlanmasını bekleyin.",
-        "warning",
+        "warning"
       );
     }
   }, [otherUserId]);
@@ -322,21 +384,52 @@ function App() {
     );
   }
 
+  if (!networkStatus) {
+    return (
+      <div className="fixed inset-0 bg-gray-900 flex items-center justify-center">
+        <div className="bg-red-600 p-6 rounded-lg text-white text-center max-w-md">
+          <h2 className="text-2xl font-bold mb-4">İnternet Bağlantısı Yok</h2>
+          <p className="mb-4">
+            Lütfen internet bağlantınızı kontrol edin ve tekrar deneyin.
+          </p>
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isReconnecting) {
+    return (
+      <div className="fixed inset-0 bg-gray-900 flex items-center justify-center">
+        <div className="bg-blue-600 p-6 rounded-lg text-white text-center max-w-md">
+          <h2 className="text-2xl font-bold mb-4">Yeniden Bağlanılıyor</h2>
+          <p className="mb-4">
+            Deneme {reconnectAttempts}/{maxReconnectAttempts}
+          </p>
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-100 font-sans">
+    <div className="min-h-screen bg-gray-900 font-sans text-white">
       <LoadingBar color="#f11946" ref={socketLoadingBarRef} shadow={false} />
       <LoadingBar color="#a0aec0" ref={loadingBarRef} shadow={false} />
+
       {!username ? (
-        <UsernameInput onUsernameSubmit={handleUsernameSubmit} />
+        <div className="min-h-screen flex items-center justify-center">
+          <UsernameInput onUsernameSubmit={handleUsernameSubmit} />
+        </div>
       ) : (
         <div className="min-h-screen flex">
           {showSidebar && (
-            <aside className="bg-gray-800 text-white w-64 p-4">
-              <div className="flex items-center justify-between mb-4">
+            <aside className="bg-gray-800 text-white w-72 p-6 shadow-lg">
+              <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-bold">Video Listesi</h3>
                 <button
                   onClick={handleExit}
-                  className="text-gray-500 hover:text-white"
+                  className="text-gray-400 hover:text-white transition-colors"
                 >
                   <FontAwesomeIcon icon={faSignOutAlt} />
                 </button>
@@ -350,7 +443,7 @@ function App() {
               />
               <button
                 onClick={() => setShowFileUpload(true)}
-                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mt-4 w-full flex items-center justify-center"
+                className="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center"
               >
                 <FontAwesomeIcon icon={faFileUpload} className="mr-2" />
                 Video Yükle
@@ -358,26 +451,28 @@ function App() {
             </aside>
           )}
 
-          <main className="flex-grow bg-gray-900 text-white flex flex-col">
-            <header className="bg-gray-800 p-4 flex justify-between items-center">
-              <div className="flex items-center">
-                <FontAwesomeIcon icon={faFilm} className="mr-2" />
-                <span>WatchTogether</span>
+          <main className="flex-grow bg-gray-900 flex flex-col">
+            <header className="bg-gray-800 p-4 flex justify-between items-center shadow-lg">
+              <div className="flex items-center space-x-4">
+                <FontAwesomeIcon icon={faFilm} className="text-blue-500" />
+                <span className="text-xl font-bold">WatchTogether</span>
               </div>
-              <div className="flex items-center">
-                <span className="mr-4">{username}</span>
-                <FontAwesomeIcon icon={faUsers} className="mr-1" />
-                <span>{userCount}</span>
+              <div className="flex items-center space-x-6">
+                <div className="flex items-center space-x-2">
+                  <FontAwesomeIcon icon={faUsers} className="text-green-500" />
+                  <span>{userCount}</span>
+                </div>
+                <span className="text-gray-300">{username}</span>
                 <button
                   onClick={handleExit}
-                  className="ml-4 text-red-400 hover:text-red-600"
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
                 >
                   Çıkış
                 </button>
               </div>
             </header>
 
-            <div className="flex-grow flex justify-center items-center relative">
+            <div className="flex-grow flex justify-center items-center relative p-6">
               <VideoPlayer
                 videoUrl={uploadedVideo}
                 isPlaying={isPlaying}
