@@ -218,9 +218,26 @@ function VideoCall({
     isCallActive ? endCall() : startCall();
   }, [isCallActive, startCall, endCall]);
 
-  // **WebRTC Peer Connection Oluşturma Fonksiyonu**
   const createPeerConnection = useCallback(() => {
-    peerConnectionRef.current = new RTCPeerConnection({ iceServers });
+    const config = {
+      iceServers: [
+        {
+          urls: [
+            "stun:stun.l.google.com:19302",
+            "turn:35.179.115.239:3478?transport=udp",
+            "turn:35.179.115.239:3478?transport=tcp",
+            "turns:watchtogetherturn.duckdns.org:5349?transport=udp",
+            "turns:watchtogetherturn.duckdns.org:5349?transport=tcp",
+          ],
+          username: "bahadr",
+          credential: "bahadr12345",
+        },
+      ],
+      // iceTransportPolicy: "relay",
+      // iceCandidatePoolSize: 10,
+    };
+
+    peerConnectionRef.current = new RTCPeerConnection(config);
 
     peerConnectionRef.current.onicecandidate = handleICECandidateEvent;
     peerConnectionRef.current.ontrack = handleTrackEvent;
@@ -228,6 +245,16 @@ function VideoCall({
       handleNegotiationNeededEvent;
     peerConnectionRef.current.onconnectionstatechange =
       handleConnectionStateChange;
+
+    // ICE restart özelliği için
+    peerConnectionRef.current.addEventListener(
+      "iceconnectionstatechange",
+      () => {
+        if (peerConnectionRef.current.iceConnectionState === "disconnected") {
+          peerConnectionRef.current.restartIce();
+        }
+      }
+    );
   }, [iceServers]);
 
   // **ICE Candidate Handler**
