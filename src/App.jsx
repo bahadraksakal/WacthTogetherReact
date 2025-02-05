@@ -441,7 +441,7 @@ function App() {
                 />
               )}
               {/* **VideoCall bileşenini App.js içinde render edin** */}
-              {showVideoCall && otherUserId && (
+              {showVideoCall && otherUserId && socket.id === otherUserId && (
                 <VideoCall
                   socket={socket}
                   isHidden={!showVideoCall}

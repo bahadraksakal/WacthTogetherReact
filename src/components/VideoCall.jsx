@@ -78,13 +78,20 @@ function VideoCall({
   const toggleAudio = useCallback(() => {
     const newAudioState = !hasLocalAudio;
     setHasLocalAudio(newAudioState);
+
     if (localStreamRef.current) {
-      localStreamRef.current
-        .getAudioTracks()
-        .forEach((track) => (track.enabled = newAudioState));
+      localStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = newAudioState;
+        // Anlık track güncellemesi
+        const event = new MediaStreamTrackEvent("toggle", { track });
+        localStreamRef.current.dispatchEvent(event);
+      });
     }
-    socket.emit("toggle-media", { audio: newAudioState, video: hasLocalVideo });
-    console.log(`Yerel mikrofon ${newAudioState ? "açıldı" : "kapandı"}`);
+
+    socket.volatile.emit("toggle-media", {
+      audio: newAudioState,
+      video: hasLocalVideo,
+    });
   }, [hasLocalAudio, hasLocalVideo, socket]);
 
   const toggleVideo = useCallback(() => {
@@ -215,15 +222,20 @@ function VideoCall({
   }, []);
 
   const toggleCall = useCallback(() => {
-    isCallActive ? endCall() : startCall();
-  }, [isCallActive, startCall, endCall]);
+    if (!isCallActive) {
+      startCall();
+      socket.emit("initiate-call", { to: otherUserId });
+    } else {
+      endCall();
+      socket.emit("end-call", { to: otherUserId });
+    }
+  }, [isCallActive, startCall, endCall, otherUserId]);
 
   const createPeerConnection = useCallback(() => {
     const config = {
       iceServers: [
         {
           urls: [
-            "stun:stun.l.google.com:19302",
             "turn:35.179.115.239:3478?transport=udp",
             "turn:35.179.115.239:3478?transport=tcp",
             "turns:watchtogetherturn.duckdns.org:5349?transport=udp",
