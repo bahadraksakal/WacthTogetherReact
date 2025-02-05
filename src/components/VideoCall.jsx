@@ -167,13 +167,17 @@ function VideoCall({
     }
   }, []);
 
-  const handleRemoteVolumeChange = useCallback((socketId, value) => {
-    setRemoteVolume((prev) => ({ ...prev, [socketId]: value }));
-    // Uzak video elementinin sesini ayarla
-    if (remoteVideosRef.current[socketId]) {
-      remoteVideosRef.current[socketId].volume = value / 100;
-    }
-  }, []);
+  const handleRemoteVolumeChange = useCallback(
+    (socketId, value) => {
+      socket.emit("remote-volume-change", { socketId, value });
+      setRemoteVolume((prev) => ({ ...prev, [socketId]: value }));
+      // Uzak video elementinin sesini ayarla
+      if (remoteVideosRef.current[socketId]) {
+        remoteVideosRef.current[socketId].volume = value / 100;
+      }
+    },
+    [socket]
+  );
 
   const startCall = useCallback(async () => {
     setIsCallActive(true);
@@ -275,7 +279,7 @@ function VideoCall({
       if (event.candidate) {
         socket.emit("ice-candidate", {
           candidate: event.candidate,
-          to: Object.keys(remoteStreams)[0], // İlk remote user'a gönderiyoruz, çoklu görüşme için düzenlenmeli
+          to: Object.keys(remoteStreams), // Tüm kullanıcılara gönder
         });
       }
     },
@@ -283,14 +287,18 @@ function VideoCall({
   );
 
   // **Track Handler**
-  const handleTrackEvent = useCallback((event) => {
-    console.log("Track event alındı:", event.streams[0]);
-    remoteStreamRef.current.addTrack(event.track);
-    setRemoteStreams((prevStreams) => ({
-      ...prevStreams,
-      [Object.keys(prevStreams)[0] || "remoteUser"]: remoteStreamRef.current, // İlk remote user için 'remoteUser' key'i, çoklu görüşme için düzenlenmeli
-    }));
-  }, []);
+  const handleTrackEvent = useCallback(
+    (event, socketId) => {
+      if (!remoteStreams[socketId]) {
+        remoteStreams[socketId] = new MediaStream();
+      }
+      event.streams[0].getTracks().forEach((track) => {
+        remoteStreams[socketId].addTrack(track);
+      });
+      setRemoteStreams({ ...remoteStreams });
+    },
+    [remoteStreams]
+  );
 
   // **Negotiation Needed Handler**
   const handleNegotiationNeededEvent = useCallback(async () => {
@@ -364,27 +372,25 @@ function VideoCall({
     });
 
     // **Yeni: Gelen Arama**
-    socket.on("incoming-call", async (payload) => {
-      console.log("Gelen arama:", payload);
-      const callerSocketId = payload.from;
-      const offer = payload.signal;
-
-      if (!peerConnectionRef.current) {
-        createPeerConnection(); // Peer connection yoksa oluştur
-      }
-
-      try {
-        await peerConnectionRef.current.setRemoteDescription(
-          new RTCSessionDescription(offer)
-        );
-        const answer = await peerConnectionRef.current.createAnswer();
-        await peerConnectionRef.current.setLocalDescription(answer);
-
-        socket.emit("answer-call", { signal: answer, to: callerSocketId });
-      } catch (error) {
-        console.error("Arama cevaplama hatası:", error);
-      }
-      setIsCallActive(true); // Arama aktif olarak ayarla
+    socket.on("incoming-call", ({ from }) => {
+      Swal.fire({
+        title: "Görüntülü Arama İsteği",
+        text: "Bir kullanıcı görüntülü arama yapmak istiyor. Kabul ediyor musunuz?",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonColor: "#3085d6",
+        cancelButtonColor: "#d33",
+        confirmButtonText: "Evet, Kabul Et!",
+        cancelButtonText: "Hayır",
+      }).then((result) => {
+        if (result.isConfirmed) {
+          setOtherUserId(from);
+          setShowVideoCall(true);
+          socket.emit("accept-call", { to: from });
+        } else {
+          socket.emit("reject-call", { to: from });
+        }
+      });
     });
 
     // **Yeni: Arama Cevaplandığında**
@@ -412,14 +418,54 @@ function VideoCall({
       }
     });
 
+    socket.on("end-call", ({ to }) => {
+      if (activeCalls[to]) {
+        io.to(activeCalls[to]).emit("call-ended");
+        io.to(to).emit("call-ended");
+        delete activeCalls[to];
+      }
+    });
+
+    socket.on("disconnect", () => {
+      // Aktif çağrıları temizle
+      Object.entries(activeCalls).forEach(([key, value]) => {
+        if (value === socket.id || key === socket.id) {
+          io.to(key).emit("call-ended");
+          delete activeCalls[key];
+        }
+      });
+
+      if (users[socket.id]) {
+        console.log("Kullanıcı ayrıldı:", users[socket.id].username, socket.id);
+        delete users[socket.id];
+        connectedUsers = Object.keys(users).length;
+        io.to(SERVER_ROOM).emit("existing-users", Object.values(users));
+        io.to(SERVER_ROOM).emit("user-left", socket.id);
+        socket.leave(SERVER_ROOM);
+      }
+    });
+
     return () => {
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("connect_error");
+      socket.off("server-full");
+      socket.off("existing-users");
       socket.off("user-joined");
       socket.off("user-left");
-      socket.off("remote-media-toggled");
-      socket.off("ice-servers");
+      socket.off("available-videos");
+      socket.off("video-selected");
+      socket.off("video-state");
+      socket.off("play");
+      socket.off("pause");
+      socket.off("seek");
+      socket.off("mute");
+      socket.off("unmute");
+      socket.off("volume-change");
+      socket.off("upload-start");
+      socket.off("upload-end");
       socket.off("incoming-call");
-      socket.off("call-accepted");
-      socket.off("ice-candidate");
+      socket.off("call-ended");
     };
   }, [socket, createPeerConnection, startCall, remoteStreams]);
 
@@ -427,6 +473,12 @@ function VideoCall({
     // Bağlantı kurulduğunda kendi medya durumunu gönder
     socket.emit("toggle-media", { audio: hasLocalAudio, video: hasLocalVideo });
   }, [socket, hasLocalAudio, hasLocalVideo]);
+
+  useEffect(() => {
+    setInterval(() => {
+      io.emit("ice-servers", iceServers);
+    }, 300000); // 5 dakikada bir güncelle
+  }, [iceServers]);
 
   return (
     <Rnd
