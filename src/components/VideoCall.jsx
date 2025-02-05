@@ -76,20 +76,22 @@ function VideoCall({
   const [remoteStreams, setRemoteStreams] = useState({}); // Birden fazla remote stream için state
   const [iceServers, setIceServers] = useState([]); // STUN/TURN sunucu bilgileri
 
+  // Uzak kullanıcı medya durumu için yeni state
+  const [remoteMediaStates, setRemoteMediaStates] = useState({});
+
   const toggleAudio = useCallback(() => {
     const newAudioState = !hasLocalAudio;
     setHasLocalAudio(newAudioState);
 
+    // Yerel stream'i güncelle
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach((track) => {
         track.enabled = newAudioState;
-        // Anlık track güncellemesi
-        const event = new MediaStreamTrackEvent("toggle", { track });
-        localStreamRef.current.dispatchEvent(event);
       });
     }
 
-    socket.volatile.emit("toggle-media", {
+    // Sunucuya bildir
+    socket.emit("toggle-media", {
       audio: newAudioState,
       video: hasLocalVideo,
     });
@@ -98,13 +100,19 @@ function VideoCall({
   const toggleVideo = useCallback(() => {
     const newVideoState = !hasLocalVideo;
     setHasLocalVideo(newVideoState);
+
+    // Yerel stream'i güncelle
     if (localStreamRef.current) {
-      localStreamRef.current
-        .getVideoTracks()
-        .forEach((track) => (track.enabled = newVideoState));
+      localStreamRef.current.getVideoTracks().forEach((track) => {
+        track.enabled = newVideoState;
+      });
     }
-    socket.emit("toggle-media", { audio: hasLocalAudio, video: newVideoState });
-    console.log(`Yerel kamera ${newVideoState ? "açıldı" : "kapandı"}`);
+
+    // Sunucuya bildir
+    socket.emit("toggle-media", {
+      audio: hasLocalAudio,
+      video: newVideoState,
+    });
   }, [hasLocalAudio, hasLocalVideo, socket]);
 
   const toggleExpand = useCallback(() => {
@@ -237,6 +245,8 @@ function VideoCall({
   }, [isCallActive, startCall, endCall, otherUserId]);
 
   const createPeerConnection = useCallback(() => {
+    if (peerConnectionRef.current) return;
+
     const config = {
       iceServers: [
         {
@@ -250,41 +260,34 @@ function VideoCall({
           credential: "bahadr12345",
         },
       ],
-      // iceTransportPolicy: "relay",
-      // iceCandidatePoolSize: 10,
     };
 
-    peerConnectionRef.current = new RTCPeerConnection(config);
+    const pc = new RTCPeerConnection(config);
+    peerConnectionRef.current = pc;
 
-    peerConnectionRef.current.onicecandidate = handleICECandidateEvent;
-    peerConnectionRef.current.ontrack = handleTrackEvent;
-    peerConnectionRef.current.onnegotiationneeded =
-      handleNegotiationNeededEvent;
-    peerConnectionRef.current.onconnectionstatechange =
-      handleConnectionStateChange;
-
-    // ICE restart özelliği için
-    peerConnectionRef.current.addEventListener(
-      "iceconnectionstatechange",
-      () => {
-        if (peerConnectionRef.current.iceConnectionState === "disconnected") {
-          peerConnectionRef.current.restartIce();
-        }
-      }
-    );
-  }, [iceServers]);
+    // Event listener'ları ekle
+    pc.onicecandidate = handleICECandidateEvent;
+    pc.ontrack = handleTrackEvent;
+    pc.onnegotiationneeded = handleNegotiationNeededEvent;
+    pc.onconnectionstatechange = handleConnectionStateChange;
+  }, [
+    handleICECandidateEvent,
+    handleTrackEvent,
+    handleNegotiationNeededEvent,
+    handleConnectionStateChange,
+  ]);
 
   // **ICE Candidate Handler**
   const handleICECandidateEvent = useCallback(
     (event) => {
-      if (event.candidate) {
+      if (event.candidate && peerConnectionRef.current) {
         socket.emit("ice-candidate", {
           candidate: event.candidate,
-          to: Object.keys(remoteStreams), // Tüm kullanıcılara gönder
+          to: otherUserId, // Sadece hedef kullanıcıya gönder
         });
       }
     },
-    [socket, remoteStreams]
+    [socket, otherUserId]
   );
 
   // **Track Handler**
@@ -396,13 +399,18 @@ function VideoCall({
 
     // **Yeni: Arama Cevaplandığında**
     socket.on("call-accepted", async (signal) => {
-      console.log("Arama kabul edildi:", signal);
       try {
-        await peerConnectionRef.current.setRemoteDescription(
-          new RTCSessionDescription(signal)
-        );
-        startCall(); // Aramayı başlat (medya stream'lerini aç)
-        setIsCallActive(true); // Arama aktif olarak ayarla
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.setRemoteDescription(
+            new RTCSessionDescription(signal)
+          );
+          const answer = await peerConnectionRef.current.createAnswer();
+          await peerConnectionRef.current.setLocalDescription(answer);
+          socket.emit("accept-call", {
+            signal: answer,
+            to: otherUserId,
+          });
+        }
       } catch (error) {
         console.error("Arama kabul edildiğinde hata:", error);
       }
@@ -411,9 +419,11 @@ function VideoCall({
     // **Yeni: ICE Candidate Alındığında**
     socket.on("ice-candidate", async (candidate) => {
       try {
-        await peerConnectionRef.current.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(
+            new RTCIceCandidate(candidate)
+          );
+        }
       } catch (error) {
         console.error("ICE candidate ekleme hatası:", error);
       }
@@ -446,6 +456,19 @@ function VideoCall({
       }
     });
 
+    // Medya durum güncelleme listener'ı
+    socket.on("remote-media-updated", ({ userId, audio, video }) => {
+      setRemoteMediaStates((prev) => ({
+        ...prev,
+        [userId]: { audio, video },
+      }));
+    });
+
+    // Hata listener'ı
+    socket.on("call-error", (message) => {
+      Swal.fire("Hata!", message, "error");
+    });
+
     return () => {
       socket.off("connect");
       socket.off("disconnect");
@@ -467,6 +490,9 @@ function VideoCall({
       socket.off("upload-end");
       socket.off("incoming-call");
       socket.off("call-ended");
+      socket.off("ice-candidate");
+      socket.off("remote-media-updated");
+      socket.off("call-error");
     };
   }, [socket, createPeerConnection, startCall, remoteStreams]);
 
@@ -550,9 +576,9 @@ function VideoCall({
         <div className="p-2 flex flex-col h-[calc(100%-42px)]">
           <div className="mt-2">
             <div className="flex overflow-x-auto">
-              {Object.entries(remoteUsersMedia).map(([socketId, media]) => (
+              {Object.entries(remoteMediaStates).map(([userId, media]) => (
                 <div
-                  key={socketId}
+                  key={userId}
                   className="relative w-full h-1/2 bg-gray-900 object-cover rounded-md mb-2"
                   style={{
                     borderRadius: "1.5rem",
@@ -561,9 +587,9 @@ function VideoCall({
                   }}
                 >
                   <video
-                    ref={(el) => (remoteVideosRef.current[socketId] = el)}
+                    ref={(el) => (remoteVideosRef.current[userId] = el)}
                     autoPlay
-                    muted={isRemoteAudioMuted[socketId]}
+                    muted={isRemoteAudioMuted[userId]}
                     className="relative top-0 left-0 w-full h-full object-cover rounded-md"
                     style={{
                       borderRadius: "1.5rem",
@@ -672,7 +698,7 @@ function VideoCall({
             >
               <FontAwesomeIcon icon={isCallActive ? faPhone : faPhoneSlash} />
             </button>
-            {Object.keys(remoteUsersMedia).map((socketId) => (
+            {Object.keys(remoteMediaStates).map((socketId) => (
               <button
                 key={socketId}
                 onClick={() => toggleRemoteMute(socketId)}
@@ -708,7 +734,7 @@ function VideoCall({
             />
 
             {/* Remote Users Volume Sliders */}
-            {Object.keys(remoteUsersMedia).map((socketId) => (
+            {Object.keys(remoteMediaStates).map((socketId) => (
               <div key={socketId}>
                 <label className="text-sm font-semibold">
                   {socketId} Ses (0-100)
