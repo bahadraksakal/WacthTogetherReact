@@ -59,6 +59,8 @@ function VideoPlayer({
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const controlsTimeout = useRef(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [lastUpdate, setLastUpdate] = useState(0);
 
   // Play/Pause butonuna basıldığında
   const handlePlayPause = useCallback(() => {
@@ -68,9 +70,15 @@ function VideoPlayer({
   // Video zaman güncellemesi
   const handleTimeUpdate = useCallback(() => {
     if (videoRef.current) {
-      onSeek(videoRef.current.currentTime);
+      const currentTime = videoRef.current.currentTime;
+      setCurrentTime(currentTime);
+      // Sadece 1 saniyede bir güncelle
+      if (Date.now() - lastUpdate > 1000) {
+        socket.volatile.emit("time-update", currentTime);
+        setLastUpdate(Date.now());
+      }
     }
-  }, [onSeek, videoRef]);
+  }, [socket]);
 
   // Mute/Unmute
   const handleMuteUnmute = useCallback(() => {
@@ -150,6 +158,25 @@ function VideoPlayer({
     };
   }, [isFullScreen, handleMouseMove]);
 
+  // Gelişmiş senkronizasyon için useEffect
+  useEffect(() => {
+    const handleVideoState = (state) => {
+      if (videoRef.current) {
+        if (Math.abs(videoRef.current.currentTime - state.currentTime) > 1) {
+          videoRef.current.currentTime = state.currentTime;
+        }
+        if (state.isPlaying !== isPlaying) {
+          state.isPlaying ? videoRef.current.play() : videoRef.current.pause();
+        }
+        videoRef.current.volume = state.volume;
+        videoRef.current.muted = state.muted;
+      }
+    };
+
+    socket.on("video-state", handleVideoState);
+    return () => socket.off("video-state", handleVideoState);
+  }, [socket, isPlaying]);
+
   return (
     <div
       className="bg-gray-800 rounded-md shadow-lg overflow-hidden relative h-[calc(100vh-6vh)]"
@@ -213,9 +240,7 @@ function VideoPlayer({
           />
 
           {/* Current Time */}
-          <span className="text-white text-sm">
-            {formatTime(videoRef.current?.currentTime || 0)}
-          </span>
+          <span className="text-white text-sm">{formatTime(currentTime)}</span>
 
           {/* Seek Slider */}
           <input
@@ -223,7 +248,7 @@ function VideoPlayer({
             min="0"
             max={videoRef.current?.duration || 0}
             step="0.1"
-            value={videoRef.current?.currentTime || 0}
+            value={currentTime}
             onChange={handleSeekChange}
             className="flex-grow"
             style={{ borderRadius: "1.5rem" }}

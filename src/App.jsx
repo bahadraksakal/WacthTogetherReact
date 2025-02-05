@@ -83,8 +83,12 @@ function App() {
     });
 
     socket.on("user-joined", (data) => {
-      console.log("Yeni kullanıcı katıldı:", data);
       setOtherUserId(data.id);
+      Swal.fire({
+        title: `${data.username} katıldı!`,
+        icon: "info",
+        timer: 2000,
+      });
     });
 
     socket.on("user-left", (socketId) => {
@@ -332,10 +336,18 @@ function App() {
     socket.emit("volume-change", volume);
   };
 
-  const handleSelectVideo = (filename) => {
-    console.log("Video seçiliyor:", filename);
-    socket.emit("select-video", filename);
-  };
+  const handleSelectVideo = useCallback(
+    (filename) => {
+      const videoUrl = `${url}/videos/${filename}`;
+      setUploadedVideo(videoUrl);
+      socket.emit("select-video", filename);
+      // Yeni video seçildiğinde zamanı sıfırla
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+      }
+    },
+    [socket]
+  );
 
   // **Yeni: Arama isteği gönderme fonksiyonu**
   const requestVideoCall = useCallback(() => {
