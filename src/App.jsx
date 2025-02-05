@@ -450,6 +450,7 @@ function App() {
                   isAudioCallEnabled={isAudioCallEnabled}
                   startWithAudio={true}
                   startWithVideo={true}
+                  otherUserId={otherUserId}
                 />
               )}
             </div>

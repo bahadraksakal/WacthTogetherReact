@@ -49,6 +49,7 @@ function VideoCall({
   isAudioCallEnabled,
   startWithAudio,
   startWithVideo,
+  otherUserId,
 }) {
   const localVideoRef = useRef(null);
   const remoteVideosRef = useRef({}); // Birden fazla uzaktan video için ref
